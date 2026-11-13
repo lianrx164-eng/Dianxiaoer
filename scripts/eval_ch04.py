@@ -189,6 +189,7 @@ async def _retrieve_all(samples: list[dict], strategies: list[str], client) -> d
 async def _generation(samples: list[dict], d_samples: list[dict],
                       hits_map: dict, strategies: list[str]) -> dict | None:
     sem = asyncio.Semaphore(GEN_CONCURRENCY)
+    progress = [0, len(samples) * len(strategies)]
 
     async def one(sample: dict, strategy: str):
         async with sem:
@@ -196,6 +197,7 @@ async def _generation(samples: list[dict], d_samples: list[dict],
             answer = await _try(_gen_answer(sample["query"], hits),
                                 f"gen:{sample['id']}:{strategy}")
             if answer is None:
+                progress[0] += 1
                 return None
             coverage = await _try(_judge_coverage(sample["expect_points"], answer),
                                   f"cover:{sample['id']}:{strategy}")
@@ -211,6 +213,9 @@ async def _generation(samples: list[dict], d_samples: list[dict],
                 else:
                     row["faithful"], row["reason"] = None, ""
                 row["citations"] = _citations(hits)
+            progress[0] += 1
+            if progress[0] % 40 == 0 or progress[0] == progress[1]:
+                _log(f"  generation {progress[0]}/{progress[1]}")
             return row
 
     tasks = [one(s, st) for s in samples for st in strategies]
@@ -348,6 +353,27 @@ async def main() -> None:
 
     _print_retrieval(retrieval_d, coverage_d)
 
+    report = {
+        "meta": {
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+            "eval_count": len(samples) + len(d_samples),
+            "kb_count": kb_count,
+            "embed_model": settings.embed_model,
+            "rerank_model": settings.rerank_model,
+            "judge_model": settings.chat_model,
+            "strategies": strategies,
+            "recall_k": RECALL_K,
+            "top_k": TOP_K,
+            "elapsed_sec": round(time.time() - started, 1),
+        },
+        "retrieval": retrieval_d,
+        "evidence_coverage": coverage_d,
+        "generation": None,
+        "errors": list(_ERRORS),
+    }
+    # 先把确定性两段落盘:生成段跑挂也有报告可看
+    _write_report(report)
+
     generation_d = None
     if not args.no_generation:
         try:
@@ -365,24 +391,9 @@ async def main() -> None:
             _log(f"[生成段未完成] {type(e).__name__}: {e}")
             generation_d = None
 
-    report = {
-        "meta": {
-            "generated_at": datetime.now().isoformat(timespec="seconds"),
-            "eval_count": len(samples) + len(d_samples),
-            "kb_count": kb_count,
-            "embed_model": settings.embed_model,
-            "rerank_model": settings.rerank_model,
-            "judge_model": settings.chat_model,
-            "strategies": strategies,
-            "recall_k": RECALL_K,
-            "top_k": TOP_K,
-            "elapsed_sec": round(time.time() - started, 1),
-        },
-        "retrieval": retrieval_d,
-        "evidence_coverage": coverage_d,
-        "generation": generation_d,
-        "errors": list(_ERRORS),
-    }
+    report["generation"] = generation_d
+    report["errors"] = list(_ERRORS)
+    report["meta"]["elapsed_sec"] = round(time.time() - started, 1)
     _write_report(report)
     _log(f"report -> {OUT_TXT}")
     _log(f"report -> {OUT_JSON}")
