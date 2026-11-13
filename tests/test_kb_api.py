@@ -64,6 +64,9 @@ async def test_reset_clears_mysql_and_milvus(client, db_session_factory, db_clea
         def has_collection(self, name):
             return True
 
+        def describe_collection(self, name):
+            return {"fields": [{"name": n} for n in ("id", "dense", "text", "sparse")]}
+
         def load_collection(self, name):
             pass
 
