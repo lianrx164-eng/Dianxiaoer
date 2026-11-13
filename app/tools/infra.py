@@ -43,6 +43,7 @@ async def execute_tool_call(
         args["conversation_id"] = conversation_id
 
     retries = 0 if name in registry.NO_RETRY else max_retries
+    timeout = registry.TOOL_TIMEOUTS.get(name, timeout)
     attempt = 0
     while True:
         try:

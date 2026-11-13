@@ -31,9 +31,9 @@ async def test_retry_succeeds_on_second_attempt(monkeypatch):
         if calls["n"] == 1:
             raise RuntimeError("瞬时错误")
         return {"ok": True}
-    fake = type("T", (), {"name": "query_faq", "ainvoke": staticmethod(flaky)})()
+    fake = type("T", (), {"name": "query_order", "ainvoke": staticmethod(flaky)})()
     monkeypatch.setattr(registry, "get_tool", lambda n: fake)
-    run = await infra.execute_tool_call({"name": "query_faq", "args": {"keyword": "x"}, "id": "c1"},
+    run = await infra.execute_tool_call({"name": "query_order", "args": {"order_id": "1"}, "id": "c1"},
                                         conversation_id=1, timeout=1.0, max_retries=2)
     assert run.ok is True and calls["n"] == 2
 
