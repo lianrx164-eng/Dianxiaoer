@@ -56,18 +56,20 @@ def _build_history(rows: list[Message]) -> list[BaseMessage]:
 
 
 async def _prepare_turn(user_id, message, conversation_id, model):
-    """共享编排前半:会话身份 → 落 user → 组装历史 → turn1 bind_tools 定工具 →
-    落 assistant → 有工具则并行执行落 tool。返回 (cid, messages, ai, runs)。"""
-    if conversation_id is None:
-        conversation_id = await repository.create_conversation(user_id)
-    elif await repository.get_conversation(conversation_id) is None:
-        raise ConversationNotFound(conversation_id)
+    """共享编排前半:会话身份 → 组装历史 → turn1 bind_tools 定工具 → 落库(user →
+    assistant)→ 有工具则并行执行落 tool。返回 (cid, messages, ai, runs)。
 
-    await repository.append_message(conversation_id, "user", content=message)
-    rows = await repository.list_messages(conversation_id)
-    messages = _build_history(rows)
+    先拿到 turn1 再落库:上游失败时不留下半截 user 行/孤儿会话,重试不产生重复行。"""
+    if conversation_id is not None and await repository.get_conversation(conversation_id) is None:
+        raise ConversationNotFound(conversation_id)
+    rows = await repository.list_messages(conversation_id) if conversation_id is not None else []
+    messages = [*_build_history(rows), HumanMessage(message)]
 
     ai: AIMessage = await model.bind_tools(get_all_tools()).ainvoke(messages)
+
+    if conversation_id is None:
+        conversation_id = await repository.create_conversation(user_id)
+    await repository.append_message(conversation_id, "user", content=message)
     await repository.append_message(
         conversation_id, "assistant",
         content=_text(ai) or None, tool_calls=ai.tool_calls or None,

@@ -14,11 +14,11 @@ FastAPI + LangChain,模型上游直连。
 > Git Bash / GBK 终端里直接 `curl -d '{"message":"中文"}'` 会被终端转码成非 UTF-8,服务返回 `400 There was an error parsing the body`。含中文的请求用下面的 `uv run python`(httpx 按 UTF-8 编码),或把 JSON 存成 UTF-8 文件再用 `curl --data-binary @body.json`。
 
 ```bash
-# 1. 流式对话(逐 token)
+# 1. 流式对话(逐 token;ch02 起请求体为 user_id/conversation_id)
 uv run python - <<'PY'
 import httpx
 with httpx.stream("POST", "http://localhost:8000/api/chat",
-                  json={"session_id": "s1", "message": "你们卖猫粮吗?"},
+                  json={"user_id": "u1", "message": "你们卖猫粮吗?"},
                   timeout=120) as r:
     for line in r.iter_lines():
         print(line)

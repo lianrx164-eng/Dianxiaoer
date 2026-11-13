@@ -9,6 +9,7 @@ os.environ.setdefault("CHAT_API_KEY", "test-key")
 
 import pytest_asyncio
 from sqlalchemy import text
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.config import settings
@@ -29,13 +30,17 @@ def _ddl_statements() -> list[str]:
 
 @pytest_asyncio.fixture(scope="session")
 async def _test_engine():
-    # 用 server-url(不带库名)建 mewhelp_test 库
-    server_url = settings.test_database_url.rsplit("/", 1)[0]
-    admin = create_async_engine(server_url, isolation_level="AUTOCOMMIT")
+    # 库名从 TEST_DATABASE_URL 解析,并强制含 test:fixture 会 DROP 该库,配错代价太大
+    url = make_url(settings.test_database_url)
+    db_name = url.database or ""
+    assert db_name.isidentifier() and "test" in db_name.lower(), (
+        f"TEST_DATABASE_URL 必须指向名称含 test 的库(会被 DROP/重建),当前:{db_name!r}"
+    )
+    admin = create_async_engine(url.set(database=None), isolation_level="AUTOCOMMIT")
     async with admin.connect() as conn:
-        await conn.execute(text("DROP DATABASE IF EXISTS mewhelp_test"))
+        await conn.execute(text(f"DROP DATABASE IF EXISTS `{db_name}`"))
         await conn.execute(
-            text("CREATE DATABASE mewhelp_test CHARACTER SET utf8mb4")
+            text(f"CREATE DATABASE `{db_name}` CHARACTER SET utf8mb4")
         )
     await admin.dispose()
 

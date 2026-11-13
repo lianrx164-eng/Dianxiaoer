@@ -1,7 +1,9 @@
 from langchain_core.messages import AIMessage
+from sqlalchemy import func, select
 
 from app.core import agent
 from app.db import repository as repo
+from app.db.models import Conversation, Message
 
 
 class FakeModel:
@@ -84,3 +86,35 @@ async def test_convergence_call_carries_single_round_guard(db_session_factory, d
     # DeepSeek 在无 tools 的收敛步想再调工具时,会把调用当特殊标记文本吐出来
     assert "不要再" in converged[-1].content
     assert converged[-1].type == "system"
+
+
+class BoomModel(FakeModel):
+    async def ainvoke(self, messages):
+        raise RuntimeError("upstream boom")
+
+
+async def test_upstream_failure_leaves_no_partial_rows(db_session_factory, db_clean):
+    # turn1 落 user 之前就失败:不能留下半截 user 行或孤儿会话,
+    # 否则用户重试同一句会在历史里出现两遍
+    model = BoomModel([])
+    try:
+        await agent.run_agent_turn("u1", "hi", None, model=model)
+        assert False, "上游异常应向上抛"
+    except RuntimeError:
+        pass
+    async with db_session_factory() as s:
+        msg_count = (await s.execute(select(func.count()).select_from(Message))).scalar_one()
+        conv_count = (await s.execute(select(func.count()).select_from(Conversation))).scalar_one()
+    assert msg_count == 0
+    assert conv_count == 0
+
+
+async def test_retry_after_failure_has_single_user_row(db_session_factory, db_clean):
+    try:
+        await agent.run_agent_turn("u1", "hi", None, model=BoomModel([]))
+    except RuntimeError:
+        pass
+    res = await agent.run_agent_turn(
+        "u1", "hi", None, model=FakeModel([AIMessage(content="你好")]))
+    msgs = await repo.list_messages(res.conversation_id)
+    assert [m.role for m in msgs] == ["user", "assistant"]   # 重试不产生重复 user 行

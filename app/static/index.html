@@ -316,7 +316,12 @@
   })();
 
   let conversationId = (() => {
-    try { return localStorage.getItem(CONV_KEY); } catch (e) { return null; }
+    try {
+      const v = localStorage.getItem(CONV_KEY);
+      if (v && /^\d+$/.test(v)) return v;
+      if (v) localStorage.removeItem(CONV_KEY);   // 垃圾值直接清掉
+      return null;
+    } catch (e) { return null; }
   })();
 
   let busy = false;
@@ -342,6 +347,7 @@
     row.append(bubble);
     messagesEl.append(row);
     scrollToBottom();
+    return row;
   }
 
   function createAssistantRow() {
@@ -494,70 +500,85 @@
     text = text.trim();
     if (!text || busy) return;
     setBusy(true);
-    addUser(text);
-    const { bubble, toolsEl, textEl } = createAssistantRow();
-    textEl.classList.add('streaming');
-    let rawText = '';
-    let started = false;
-    let upstreamError = null;
-
-    // 等首字期间保持三个流动的点(工具执行时也不清空,免得看着像卡住)
-    textEl.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
-
+    let retried = false;
     try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: userId, message: text, conversation_id: conversationId }),
-      });
-      if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
+      for (;;) {
+        const userRow = addUser(text);
+        const { bubble, toolsEl, textEl } = createAssistantRow();
+        textEl.classList.add('streaming');
+        // 等首字期间保持三个流动的点(工具执行时也不清空,免得看着像卡住)
+        textEl.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
+        let rawText = '';
+        let started = false;
+        let upstreamError = null;
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        let idx;
-        while ((idx = buffer.indexOf('\n\n')) !== -1) {
-          const frame = buffer.slice(0, idx);
-          buffer = buffer.slice(idx + 2);
-          const parsed = parseFrame(frame);
-          if (parsed.done) continue;
-          if (parsed.event === 'error') {
-            upstreamError = (parsed.payload && parsed.payload.message) || '上游模型暂时不可用';
+        try {
+          const res = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: userId, message: text, conversation_id: conversationId }),
+          });
+          if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
+
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            let idx;
+            while ((idx = buffer.indexOf('\n\n')) !== -1) {
+              const frame = buffer.slice(0, idx);
+              buffer = buffer.slice(idx + 2);
+              const parsed = parseFrame(frame);
+              if (parsed.done) continue;
+              if (parsed.event === 'error') {
+                upstreamError = (parsed.payload && parsed.payload.message) || '上游模型暂时不可用';
+                continue;
+              }
+              const payload = parsed.payload;
+              if (!payload) continue;
+              if (payload.event === 'tool' && payload.name) {
+                const badge = document.createElement('span');
+                badge.className = 'badge';
+                badge.textContent = '🔧 调用了 ' + payload.name;
+                toolsEl.append(badge);
+                continue;
+              }
+              if (payload.event === 'done' && payload.conversation_id != null) {
+                saveConversationId(payload.conversation_id);
+                continue;
+              }
+              if (typeof payload.delta === 'string') {
+                if (!started) { started = true; textEl.innerHTML = ''; }
+                rawText += payload.delta;
+                textEl.innerHTML = renderMarkdown(rawText);
+                scrollToBottom();
+              }
+            }
+          }
+          if (upstreamError) throw new Error(upstreamError);
+          if (!rawText) textEl.textContent = '(小喵这次没有回复内容,请再试一次)';
+          textEl.classList.remove('streaming');
+          return;
+        } catch (err) {
+          textEl.classList.remove('streaming');
+          const msg = err && err.message ? err.message : '未知错误';
+          if (bubble.parentElement) bubble.parentElement.remove();
+          // 本地存的会话 id 已失效(库重置/换环境/垃圾值):清掉并用新会话自动重试一次
+          const staleConversation = conversationId && (msg === '会话不存在' || msg === 'HTTP 422');
+          if (!retried && staleConversation) {
+            retried = true;
+            saveConversationId(null);
+            if (userRow.parentElement) userRow.remove();
             continue;
           }
-          const payload = parsed.payload;
-          if (!payload) continue;
-          if (payload.event === 'tool' && payload.name) {
-            const badge = document.createElement('span');
-            badge.className = 'badge';
-            badge.textContent = '🔧 调用了 ' + payload.name;
-            toolsEl.append(badge);
-            continue;
-          }
-          if (payload.event === 'done' && payload.conversation_id != null) {
-            saveConversationId(payload.conversation_id);
-            continue;
-          }
-          if (typeof payload.delta === 'string') {
-            if (!started) { started = true; textEl.innerHTML = ''; }
-            rawText += payload.delta;
-            textEl.innerHTML = renderMarkdown(rawText);
-            scrollToBottom();
-          }
+          addNotice('小喵暂时联系不上:' + msg + '。请稍后重试。');
+          return;
         }
       }
-      if (upstreamError) throw new Error(upstreamError);
-      if (!rawText) textEl.textContent = '(小喵这次没有回复内容,请再试一次)';
-    } catch (err) {
-      const row = bubble.parentElement;
-      if (row) row.remove();
-      addNotice('小喵暂时联系不上:' + (err && err.message ? err.message : '未知错误') + '。请稍后重试。');
     } finally {
-      textEl.classList.remove('streaming');
       setBusy(false);
       inputEl.focus();
     }
