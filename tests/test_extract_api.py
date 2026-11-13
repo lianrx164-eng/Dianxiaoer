@@ -42,3 +42,10 @@ def test_extract_upstream_failure_returns_502():
 def test_extract_validates_empty_text():
     client = override(RunnableLambda(lambda _: None))
     assert client.post("/api/extract", json={"text": ""}).status_code == 422
+
+
+def test_extract_none_result_returns_502():
+    client = override(RunnableLambda(lambda _: None))
+    resp = client.post("/api/extract", json={"text": "订单坏了要退款"})
+    assert resp.status_code == 502
+    assert "detail" in resp.json()

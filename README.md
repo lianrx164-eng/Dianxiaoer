@@ -5,7 +5,9 @@ FastAPI + LangChain,模型上游直连。
 ## 启动
 
     cp .env.example .env   # 填入 CHAT_API_KEY(上游真实 key)
-    bash scripts/dev.sh    # :8000 应用(Windows 未装 make,make dev 不可用)
+    bash scripts/dev.sh    # :8000 应用(Windows 未装 make,make dev 不可用;PORT=x 可换端口)
+
+应用内预览走 `.claude/launch.json`(8002,带 `--reload`),与命令行入口等价,只是端口不同。
 
 ## 验收
 

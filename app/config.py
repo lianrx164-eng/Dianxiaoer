@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     chat_base_url: str
     chat_api_key: str
     token_budget: int = 2000
+    # 提取任务的上游思考开关。默认 None = 不发送该参数,保证换上游只改 .env;
+    # DeepSeek 需设 disabled(思考模式不支持强制 tool_choice)
+    extract_thinking: str | None = None
 
 
 settings = Settings()

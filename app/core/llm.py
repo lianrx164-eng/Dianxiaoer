@@ -1,9 +1,13 @@
+from typing import Any
+
 from langchain_openai import ChatOpenAI
 
 from app.config import settings
 
 
-def get_chat_model(streaming: bool = False) -> ChatOpenAI:
+def get_chat_model(
+    streaming: bool = False, extra_body: dict[str, Any] | None = None
+) -> ChatOpenAI:
     """直连聊天上游。地址、模型名、密钥全从 .env 来,换上游不动这里。"""
     return ChatOpenAI(
         model=settings.chat_model,
@@ -13,4 +17,5 @@ def get_chat_model(streaming: bool = False) -> ChatOpenAI:
         temperature=0.3,
         timeout=60,
         max_retries=1,
+        extra_body=extra_body,
     )

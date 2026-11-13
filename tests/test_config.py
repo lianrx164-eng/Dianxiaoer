@@ -18,3 +18,18 @@ def test_settings_env_override(monkeypatch):
         monkeypatch.setenv(k, v)
     monkeypatch.setenv("TOKEN_BUDGET", "500")
     assert Settings(_env_file=None).token_budget == 500
+
+
+def test_extract_thinking_defaults_to_none(monkeypatch):
+    # 默认不发送上游专有的 thinking 参数,换上游不用动代码
+    for k, v in {"CHAT_MODEL": "m", "CHAT_BASE_URL": "u", "CHAT_API_KEY": "k"}.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.delenv("EXTRACT_THINKING", raising=False)
+    assert Settings(_env_file=None).extract_thinking is None
+
+
+def test_extract_thinking_env_override(monkeypatch):
+    for k, v in {"CHAT_MODEL": "m", "CHAT_BASE_URL": "u", "CHAT_API_KEY": "k"}.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("EXTRACT_THINKING", "disabled")
+    assert Settings(_env_file=None).extract_thinking == "disabled"

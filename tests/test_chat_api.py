@@ -29,7 +29,7 @@ def collect_sse(resp) -> tuple[list[str], str]:
 
 def teardown_function():
     app.dependency_overrides.clear()
-    chat_api.store._sessions.clear()
+    chat_api.store.clear()
 
 
 def test_chat_streams_tokens_and_done():
@@ -94,6 +94,7 @@ def test_chat_emits_error_frame_and_keeps_store_clean():
         lines = list(r.iter_lines())
     assert "event: error" in lines
     assert any(line.startswith("data: ") and "上游" in line for line in lines)
+    assert any("upstream down" in line for line in lines)  # 错误详情随帧返回
     assert "data: [DONE]" not in lines
     assert chat_api.store.get("s4") == []
 

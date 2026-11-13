@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# 单入口拉起 FastAPI 应用(:8000)
+# 单入口拉起 FastAPI 应用(默认 :8000,PORT 可覆盖)。
+# .env 由应用内 pydantic-settings 读取,这里不再 source,避免两套解析规则。
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -11,6 +12,5 @@ if [ ! -f .env ]; then
   echo "缺少 .env,请 cp .env.example .env 并填三组配置" >&2
   exit 1
 fi
-set -a; source .env; set +a
 
-uv run uvicorn app.main:app --port 8000
+uv run uvicorn app.main:app --port "${PORT:-8000}"

@@ -16,3 +16,8 @@ def test_factory_bounds_upstream_timeouts():
     m = get_chat_model()
     assert m.request_timeout == 60
     assert m.max_retries == 1
+
+
+def test_factory_passes_extra_body_through():
+    body = {"thinking": {"type": "disabled"}}
+    assert get_chat_model(extra_body=body).extra_body == body

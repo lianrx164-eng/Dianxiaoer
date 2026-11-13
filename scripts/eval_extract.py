@@ -1,12 +1,13 @@
 """对 /api/extract 跑标注样例,核对 order_id 与 request_type(expected_solution 人工目检)。"""
 import json
+import os
 import pathlib
 import sys
 
 import httpx
 
 SAMPLES = pathlib.Path(__file__).parent.parent / "tests/data/extract_samples.json"
-BASE = "http://localhost:8000"
+BASE = os.environ.get("BASE_URL", "http://localhost:8000")
 
 
 def main() -> int:

@@ -7,7 +7,10 @@ logger = logging.getLogger(__name__)
 
 
 class SessionStore:
-    """内存会话存储,session_id -> 消息列表。本章不做持久化。"""
+    """内存会话存储,session_id -> 消息列表。本章不做持久化,也不淘汰,
+
+    会话数多了内存只增,跨章做持久化时一并处理。
+    """
 
     def __init__(self) -> None:
         self._sessions: dict[str, list[BaseMessage]] = {}
@@ -17,6 +20,9 @@ class SessionStore:
 
     def append(self, session_id: str, *messages: BaseMessage) -> None:
         self._sessions.setdefault(session_id, []).extend(messages)
+
+    def clear(self) -> None:
+        self._sessions.clear()
 
 
 def trim_history(messages: list[BaseMessage], max_tokens: int) -> list[BaseMessage]:
