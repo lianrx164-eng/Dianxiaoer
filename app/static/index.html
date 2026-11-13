@@ -113,7 +113,70 @@
   .row.assistant .bubble { background: #fffdf6; }
   .row.assistant .bubble.notice { background: #ffd9cf; font-size: 14px; }
 
-  .bubble.streaming::after {
+  .bubble .text { white-space: normal; }
+  .bubble .text p { margin: 0 0 8px; }
+  .bubble .text p:last-child { margin-bottom: 0; }
+  .bubble .text :is(h1,h2,h3,h4,h5,h6) { margin: 10px 0 6px; line-height: 1.35; }
+  .bubble .text h1 { font-size: 18px; } .bubble .text h2 { font-size: 17px; }
+  .bubble .text h3 { font-size: 16px; } .bubble .text h4,h5,h6 { font-size: 15px; }
+  .bubble .text ul, .bubble .text ol { margin: 0 0 8px; padding-left: 22px; }
+  .bubble .text li { margin: 2px 0; }
+  .bubble .text code {
+    font-family: Consolas, "SFMono-Regular", Menlo, monospace;
+    font-size: 13px;
+    background: #f3ead9;
+    border: 1px solid #d9c9ae;
+    padding: 1px 5px;
+  }
+  .bubble .text pre {
+    margin: 8px 0;
+    padding: 10px 12px;
+    background: #2b2622;
+    color: #f7efe2;
+    overflow-x: auto;
+    border: 2px solid #1c1c1c;
+  }
+  .bubble .text pre code { background: transparent; border: 0; padding: 0; color: inherit; }
+  .bubble .text blockquote {
+    margin: 8px 0;
+    padding: 4px 12px;
+    border-left: 4px solid #f7941d;
+    background: #fbf1df;
+    color: #5d5142;
+  }
+  .bubble .text hr { border: 0; border-top: 2px dashed #c9b797; margin: 10px 0; }
+  .bubble .text table { border-collapse: collapse; margin: 8px 0; font-size: 14px; }
+  .bubble .text th, .bubble .text td { border: 2px solid #1c1c1c; padding: 4px 10px; text-align: left; }
+  .bubble .text th { background: #f7941d; }
+  .bubble .text a { color: #b34700; }
+
+  .tools { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .tools:empty { display: none; }
+  .badge {
+    font-size: 12px;
+    line-height: 1.4;
+    color: #6b5d4a;
+    background: #f3ead9;
+    border: 1px dashed #a89277;
+    border-radius: 999px;
+    padding: 2px 10px;
+  }
+
+  .typing { display: inline-flex; gap: 5px; padding: 4px 0; }
+  .typing i {
+    width: 8px; height: 8px;
+    background: #b9a684;
+    border: 2px solid #1c1c1c;
+    animation: bounce 1s infinite;
+  }
+  .typing i:nth-child(2) { animation-delay: 0.15s; }
+  .typing i:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes bounce {
+    0%, 60%, 100% { transform: translateY(0); }
+    30% { transform: translateY(-5px); }
+  }
+
+  .text.streaming::after {
     content: "▌";
     margin-left: 2px;
     animation: blink 0.9s steps(1) infinite;
@@ -234,12 +297,36 @@
   const sendEl = document.getElementById('send');
   const newChatEl = document.getElementById('newChat');
 
-  let sessionId = makeSessionId();
-  let busy = false;
+  const USER_KEY = 'mewhelp_user_id';
+  const CONV_KEY = 'mewhelp_conversation_id';
 
-  function makeSessionId() {
+  function makeId() {
     if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
     return String(Date.now()) + '-' + Math.random().toString(16).slice(2);
+  }
+
+  const userId = (() => {
+    let id = null;
+    try { id = localStorage.getItem(USER_KEY); } catch (e) { /* 隐私模式 */ }
+    if (!id) {
+      id = makeId();
+      try { localStorage.setItem(USER_KEY, id); } catch (e) { /* 隐私模式 */ }
+    }
+    return id;
+  })();
+
+  let conversationId = (() => {
+    try { return localStorage.getItem(CONV_KEY); } catch (e) { return null; }
+  })();
+
+  let busy = false;
+
+  function saveConversationId(id) {
+    conversationId = id == null ? null : String(id);
+    try {
+      if (conversationId) localStorage.setItem(CONV_KEY, conversationId);
+      else localStorage.removeItem(CONV_KEY);
+    } catch (e) { /* 隐私模式 */ }
   }
 
   function scrollToBottom() {
@@ -257,7 +344,7 @@
     scrollToBottom();
   }
 
-  function addAssistant(text = '') {
+  function createAssistantRow() {
     const row = document.createElement('div');
     row.className = 'row assistant';
     const avatar = document.createElement('div');
@@ -265,10 +352,20 @@
     avatar.innerHTML = CAT_SVG;
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
-    bubble.textContent = text;
+    const toolsEl = document.createElement('div');
+    toolsEl.className = 'tools';
+    const textEl = document.createElement('div');
+    textEl.className = 'text';
+    bubble.append(toolsEl, textEl);
     row.append(avatar, bubble);
     messagesEl.append(row);
     scrollToBottom();
+    return { bubble, toolsEl, textEl };
+  }
+
+  function addAssistant(text = '') {
+    const { bubble, textEl } = createAssistantRow();
+    textEl.textContent = text;
     return bubble;
   }
 
@@ -299,21 +396,119 @@
     return { event, payload };
   }
 
+  // ---- 极简 markdown:先整体 HTML 转义再渲染,防注入 ----
+  function escapeHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function inline(s) {
+    s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+    const links = [];
+    s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (m, text, url) => {
+      links.push('<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + text + '</a>');
+      return '\u0001' + (links.length - 1) + '\u0001';
+    });
+    s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, (m, pre, url) => {
+      links.push('<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + url + '</a>');
+      return pre + '\u0001' + (links.length - 1) + '\u0001';
+    });
+    return s.replace(/\u0001(\d+)\u0001/g, (m, i) => links[+i]);
+  }
+
+  function renderMarkdown(src) {
+    const codes = [];
+    src = src.replace(/```[^\n]*\n([\s\S]*?)```/g, (m, code) => {
+      codes.push(code.replace(/\n$/, ''));
+      return '\u0000' + (codes.length - 1) + '\u0000';
+    });
+    const lines = escapeHtml(src).split('\n');
+    const html = [];
+    let para = [];
+    let list = null;
+    const flushPara = () => {
+      if (para.length) { html.push('<p>' + inline(para.join('<br>')) + '</p>'); para = []; }
+    };
+    const flushList = () => {
+      if (list) { html.push('</' + list + '>'); list = null; }
+    };
+    const closeBlocks = () => { flushPara(); flushList(); };
+    let i = 0;
+    while (i < lines.length) {
+      const t = lines[i].trim();
+      if (!t) { closeBlocks(); i++; continue; }
+      const codeRef = t.match(/^\u0000(\d+)\u0000$/);
+      if (codeRef) {
+        closeBlocks();
+        html.push('<pre><code>' + escapeHtml(codes[+codeRef[1]]) + '</code></pre>');
+        i++; continue;
+      }
+      let m;
+      if ((m = t.match(/^(#{1,6})\s+(.*)$/))) {
+        closeBlocks();
+        const level = m[1].length;
+        html.push('<h' + level + '>' + inline(m[2]) + '</h' + level + '>');
+        i++; continue;
+      }
+      if (/^(-{3,}|\*{3,}|_{3,})$/.test(t.replace(/\s+/g, ''))) {
+        closeBlocks(); html.push('<hr>'); i++; continue;
+      }
+      if ((m = t.match(/^&gt;\s?(.*)$/))) {
+        closeBlocks(); html.push('<blockquote>' + inline(m[1]) + '</blockquote>'); i++; continue;
+      }
+      if (t.startsWith('|') && i + 1 < lines.length && /^\|?[\s:|-]+\|?$/.test(lines[i + 1].trim())) {
+        closeBlocks();
+        const header = t;
+        i += 2;
+        const rows = [];
+        while (i < lines.length && lines[i].trim().startsWith('|')) { rows.push(lines[i].trim()); i++; }
+        const cells = (r) => r.replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+        html.push('<table><thead><tr>' +
+          cells(header).map((c) => '<th>' + inline(c) + '</th>').join('') +
+          '</tr></thead><tbody>' +
+          rows.map((r) => '<tr>' + cells(r).map((c) => '<td>' + inline(c) + '</td>').join('') + '</tr>').join('') +
+          '</tbody></table>');
+        continue;
+      }
+      if ((m = t.match(/^[-*]\s+(.*)$/))) {
+        flushPara();
+        if (list !== 'ul') { flushList(); html.push('<ul>'); list = 'ul'; }
+        html.push('<li>' + inline(m[1]) + '</li>');
+        i++; continue;
+      }
+      if ((m = t.match(/^\d+\.\s+(.*)$/))) {
+        flushPara();
+        if (list !== 'ol') { flushList(); html.push('<ol>'); list = 'ol'; }
+        html.push('<li>' + inline(m[1]) + '</li>');
+        i++; continue;
+      }
+      para.push(t);
+      i++;
+    }
+    closeBlocks();
+    return html.join('');
+  }
+
   async function sendMessage(text) {
     text = text.trim();
     if (!text || busy) return;
     setBusy(true);
     addUser(text);
-    const bubble = addAssistant('');
-    bubble.classList.add('streaming');
-    let gotText = false;
+    const { bubble, toolsEl, textEl } = createAssistantRow();
+    textEl.classList.add('streaming');
+    let rawText = '';
+    let started = false;
     let upstreamError = null;
+
+    // 等首字期间保持三个流动的点(工具执行时也不清空,免得看着像卡住)
+    textEl.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
 
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: sessionId, message: text }),
+        body: JSON.stringify({ user_id: userId, message: text, conversation_id: conversationId }),
       });
       if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
 
@@ -334,21 +529,35 @@
             upstreamError = (parsed.payload && parsed.payload.message) || '上游模型暂时不可用';
             continue;
           }
-          if (parsed.payload && typeof parsed.payload.delta === 'string') {
-            gotText = true;
-            bubble.textContent += parsed.payload.delta;
+          const payload = parsed.payload;
+          if (!payload) continue;
+          if (payload.event === 'tool' && payload.name) {
+            const badge = document.createElement('span');
+            badge.className = 'badge';
+            badge.textContent = '🔧 调用了 ' + payload.name;
+            toolsEl.append(badge);
+            continue;
+          }
+          if (payload.event === 'done' && payload.conversation_id != null) {
+            saveConversationId(payload.conversation_id);
+            continue;
+          }
+          if (typeof payload.delta === 'string') {
+            if (!started) { started = true; textEl.innerHTML = ''; }
+            rawText += payload.delta;
+            textEl.innerHTML = renderMarkdown(rawText);
             scrollToBottom();
           }
         }
       }
       if (upstreamError) throw new Error(upstreamError);
-      if (!gotText) bubble.textContent = '(小喵这次没有回复内容,请再试一次)';
+      if (!rawText) textEl.textContent = '(小喵这次没有回复内容,请再试一次)';
     } catch (err) {
       const row = bubble.parentElement;
       if (row) row.remove();
       addNotice('小喵暂时联系不上:' + (err && err.message ? err.message : '未知错误') + '。请稍后重试。');
     } finally {
-      bubble.classList.remove('streaming');
+      textEl.classList.remove('streaming');
       setBusy(false);
       inputEl.focus();
     }
@@ -378,7 +587,7 @@
 
   newChatEl.addEventListener('click', () => {
     if (busy) return;
-    sessionId = makeSessionId();
+    saveConversationId(null);
     messagesEl.innerHTML = '';
     addAssistant(WELCOME);
     inputEl.focus();
