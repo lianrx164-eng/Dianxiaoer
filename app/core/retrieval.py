@@ -1,3 +1,5 @@
+import asyncio
+
 from app.config import settings
 from app.core import embeddings, rerank
 from app.kb import milvus_client
@@ -25,23 +27,27 @@ async def search_knowledge(
     top_k = top_k or settings.rerank_top_k
     text = bm25_query or query
     client = client or milvus_client.get_client()
-    milvus_client.ensure_collection(client, collection=collection)
+    await asyncio.to_thread(milvus_client.ensure_collection, client, collection=collection)
 
     if strategy == "vector":
         vec = await embeddings.embed_query(query)
-        hits = milvus_client.dense_search(
+        hits = await asyncio.to_thread(
+            milvus_client.dense_search,
             client, vec, top_k, category=category, collection=collection)
     elif strategy == "bm25":
-        hits = milvus_client.bm25_search(
+        hits = await asyncio.to_thread(
+            milvus_client.bm25_search,
             client, text, top_k, category=category, collection=collection)
     elif strategy == "hybrid":
         vec = await embeddings.embed_query(query)
-        hits = milvus_client.hybrid_search(
+        hits = await asyncio.to_thread(
+            milvus_client.hybrid_search,
             client, vec, text, top_k, recall=settings.recall_top_k,
             category=category, collection=collection)
     else:
         vec = await embeddings.embed_query(query)
-        recall_hits = milvus_client.hybrid_search(
+        recall_hits = await asyncio.to_thread(
+            milvus_client.hybrid_search,
             client, vec, text, settings.recall_top_k,
             recall=settings.recall_top_k, category=category, collection=collection)
         docs = [f"{h['question']} {h['answer']}" for h in recall_hits]
