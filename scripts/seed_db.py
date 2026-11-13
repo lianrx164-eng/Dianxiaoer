@@ -8,16 +8,13 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 from sqlalchemy import text
 
 from app.db.base import engine
+from app.db.sql_script import split_statements
 
 SEED = pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch02-seed.sql"
 
 
 def _statements() -> list[str]:
-    body = "\n".join(
-        ln for ln in SEED.read_text(encoding="utf-8").splitlines()
-        if not ln.strip().startswith("--")
-    )
-    return [s.strip() for s in body.split(";") if s.strip()]
+    return split_statements(SEED.read_text(encoding="utf-8"))
 
 
 async def main() -> None:
