@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>后台管理 | 喵喵优选</title>
+<link rel="stylesheet" href="/static/acceptance.css">
+<script src="/static/admin.js"></script>
+<script src="/static/acceptance.js"></script>
+</head>
+<body class="admin-page">
+<div id="admin-nav"></div>
+<main class="admin-shell">
+  <h1 class="admin-title">后台管理</h1>
+  <p class="admin-sub">每块一张卡;某块的依赖没起只让它自己显示读数失败,不连坐整页。</p>
+  <div class="grid" id="cards"><span class="muted">读取中…</span></div>
+</main>
+<script>
+  mountAdminNav('admin');
+  const { el, getJSON, pill } = AC;
+
+  function cardKind(status) {
+    if (status === '正常') return 'ok';
+    if (status === '读数失败') return 'bad';
+    return 'warn';
+  }
+
+  function renderCard(c) {
+    const metrics = el('div', { class: 'muted' });
+    const entries = Object.entries(c.metrics || {});
+    if (entries.length) {
+      metrics.textContent = entries.map(([k, v]) => k + ': ' + v).join(' · ');
+    }
+    return el('section', { class: 'card' }, [
+      el('h2', {}, [el('span', { text: c.title }), document.createTextNode(' '), pill(c.status, cardKind(c.status))]),
+      el('p', { class: 'muted', text: c.conclusion }),
+      metrics,
+      el('div', { class: 'btnrow' }, [el('a', { class: 'btn', href: c.href, text: '进入' })]),
+    ]);
+  }
+
+  (async function () {
+    const host = document.getElementById('cards');
+    try {
+      const data = await getJSON('/api/admin/overview');
+      host.innerHTML = '';
+      data.cards.forEach((c) => host.appendChild(renderCard(c)));
+    } catch (e) {
+      host.innerHTML = '';
+      host.appendChild(pill('后台读数失败:' + e.message, 'bad'));
+    }
+  })();
+</script>
+</body>
+</html>

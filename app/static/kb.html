@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>知识库录入 | 喵喵优选后台</title>
+<link rel="stylesheet" href="/static/acceptance.css">
+<script src="/static/admin.js"></script>
+<script src="/static/acceptance.js"></script>
+</head>
+<body class="admin-page">
+<div id="admin-nav"></div>
+<main class="admin-shell">
+  <h1 class="admin-title">知识库录入</h1>
+  <p class="admin-sub">切块只有一份实现:页面预览、入库与 CLI 都调 app/kb/documents.build_chunks;材料清单只在 app/kb/sources.py。</p>
+
+  <section class="card">
+    <h2>库存闸条 <span class="hint">读不到与对不上是两回事</span></h2>
+    <div class="gate" id="gate"><span class="muted">读取中…</span></div>
+  </section>
+
+  <div class="grid">
+    <section class="card">
+      <h2>① 手工录入</h2>
+      <div class="row">
+        <label>内容类型<select id="ctype">
+          <option value="policy">policy 政策</option>
+          <option value="faq">faq 常见问题</option>
+          <option value="manual">manual 手册</option>
+        </select></label>
+        <label>chunk_size<input id="chunkSize" type="number" value="400"></label>
+        <label>overlap<input id="overlap" type="number" value="60"></label>
+        <label>表格每块行数<input id="tableRows" type="number" value="10"></label>
+      </div>
+      <p></p>
+      <textarea id="manualMd" rows="9" placeholder="# 标题&#10;&#10;## 小节&#10;&#10;正文……"></textarea>
+      <div class="btnrow">
+        <button class="btn" id="previewBtn" type="button">切块预览</button>
+        <button class="btn" id="ingestBtn" type="button">录入入库</button>
+        <label class="muted"><input type="checkbox" id="doVectorize" checked> 入库后顺手向量化</label>
+        <button class="btn" id="sampleBtn" type="button">填一段示例</button>
+      </div>
+      <div class="toast" id="ingestMsg"></div>
+    </section>
+
+    <section class="card">
+      <h2>② 建库材料 <span class="hint">data/kb/*.md</span></h2>
+      <div id="materials"><span class="muted">读取中…</span></div>
+      <div id="materialJobs"></div>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2>预览结果 <span class="hint">dry-run 不写库;标出重复 / 关键条款 / 表格块</span></h2>
+    <div id="previewCounts" class="muted"></div>
+    <div id="previewOut" class="muted">尚未预览。</div>
+  </section>
+
+  <div class="grid">
+    <section class="card">
+      <h2>③ 对话挖知识</h2>
+      <div id="stagingStats" class="muted">读取中…</div>
+      <div class="btnrow"><button class="btn" id="stagingBtn" type="button">看暂存表逐条</button></div>
+      <div id="stagingList"></div>
+      <div id="mineJobs"></div>
+    </section>
+
+    <section class="card">
+      <h2>④ 向量化与双写</h2>
+      <div id="dualStats" class="muted">读取中…</div>
+      <div class="btnrow"><button class="btn" id="vectorizeBtn" type="button">向量化待补块</button></div>
+      <div id="vectorJobs"></div>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2>⑤ 检索自测 <span class="hint">本章只跑 dense 向量单路</span></h2>
+    <div class="row">
+      <label>问题<input id="searchQuery" type="text" placeholder="邮费是多少"></label>
+      <label>Top-K<input id="searchTopK" type="number" value="3"></label>
+      <label>路线<select id="searchRoute"><option value="dense">dense 向量单路</option></select></label>
+    </div>
+    <div class="btnrow">
+      <button class="btn" id="searchBtn" type="button">检索</button>
+      <button class="btn" data-preset="邮费是多少" type="button">预设:邮费是多少</button>
+      <button class="btn" data-preset="多久能发货" type="button">预设:多久能发货</button>
+      <button class="btn" data-preset="怎么开发票" type="button">预设:怎么开发票</button>
+    </div>
+    <div id="searchOut"></div>
+  </section>
+
+  <section class="card">
+    <h2>⑥ 最近入库</h2>
+    <div id="recent"><span class="muted">读取中…</span></div>
+  </section>
+</main>
+
+<script>
+  mountAdminNav('kb');
+  const { el, getJSON, pill, fmt } = AC;
+  const jobTailCache = {};
+
+  function statBox(label, value) {
+    return el('div', { class: 'stat' }, [
+      el('b', { text: fmt(value) }),
+      el('span', { text: label }),
+    ]);
+  }
+
+  async function loadOverview() {
+    try {
+      const o = await getJSON('/api/kb/overview');
+      renderGate(o);
+      renderMaterials(o.materials);
+      renderStaging(o.staging);
+      renderDual(o);
+      renderRecent(o.recent);
+      if (o.jobs) o.jobs.forEach((j) => {
+        if (j.log_tail) jobTailCache[j.name] = j.log_tail;
+        const pre = document.querySelector('[data-job="' + j.name + '"]');
+        if (pre) pre.textContent = jobTailCache[j.name] || '';
+      });
+    } catch (e) {
+      document.getElementById('gate').innerHTML = '';
+      document.getElementById('gate').appendChild(pill('读数失败:' + e.message, 'bad'));
+    }
+  }
+
+  function renderGate(o) {
+    const k = o.knowledge;
+    const gate = document.getElementById('gate');
+    gate.innerHTML = '';
+    if (!k) {
+      gate.appendChild(pill('MySQL 读不到', 'bad'));
+    } else {
+      gate.appendChild(statBox('知识块数', k.total));
+      gate.appendChild(statBox('待向量化', k.pending));
+      gate.appendChild(statBox('Milvus 条数', o.milvus_count));
+      gate.appendChild(statBox('关键条款', k.key_clause));
+    }
+    let text, kind;
+    if (o.consistent === null) { text = '双写:读不到'; kind = 'bad'; }
+    else if (o.consistent) { text = '双写:一致'; kind = 'ok'; }
+    else { text = '双写:对不上'; kind = 'warn'; }
+    gate.appendChild(pill(text, kind));
+  }
+
+  function renderMaterials(materials) {
+    const host = document.getElementById('materials');
+    host.innerHTML = '';
+    (materials || []).forEach((m) => {
+      const row = el('div', { class: 'btnrow' }, [
+        el('span', { text: m.filename + ' [' + m.content_type + ']' }),
+        m.error
+          ? pill('读不到', 'bad')
+          : el('span', { class: 'muted', text: m.chunks + ' 块 / 关键条款 ' + m.key_clauses + ' / 表格块 ' + m.table_blocks }),
+      ]);
+      if (!m.error) {
+        const btn = el('button', { class: 'btn', text: '看切块' });
+        btn.onclick = () => preview({ filename: m.filename });
+        row.appendChild(btn);
+      }
+      host.appendChild(row);
+    });
+    const jobsHost = document.getElementById('materialJobs');
+    if (!jobsHost.dataset.ready) {
+      jobsHost.appendChild(jobPanel(['kb-preview', 'kb-build']));
+      jobsHost.dataset.ready = '1';
+    }
+  }
+
+  function renderDual(o) {
+    const k = o.knowledge;
+    const host = document.getElementById('dualStats');
+    host.innerHTML = '';
+    if (!k) {
+      host.appendChild(pill('MySQL 读不到', 'bad'));
+    } else {
+      host.appendChild(el('span', { class: 'muted', text: 'pending ' + k.pending + ' / done ' + k.done + ' / Milvus ' + fmt(o.milvus_count) }));
+    }
+    const jobsHost = document.getElementById('vectorJobs');
+    if (!jobsHost.dataset.ready) {
+      jobsHost.appendChild(jobPanel(['kb-vectorize', 'kb-reset']));
+      jobsHost.dataset.ready = '1';
+    }
+  }
+
+  function renderStaging(staging) {
+    const host = document.getElementById('stagingStats');
+    host.innerHTML = '';
+    if (!staging) {
+      host.appendChild(pill('MySQL 读不到', 'bad'));
+    } else {
+      const c = staging.counts;
+      host.appendChild(el('span', { class: 'muted', text: '抽出 ' + c.extracted + ' / 保留 ' + c.kept + ' / 丢弃 ' + c.discarded + ' · 批次 ' + staging.batches }));
+    }
+    const jobsHost = document.getElementById('mineJobs');
+    if (!jobsHost.dataset.ready) {
+      jobsHost.appendChild(jobPanel(['seed-conv', 'kb-mine']));
+      jobsHost.dataset.ready = '1';
+    }
+  }
+
+  function renderRecent(recent) {
+    const host = document.getElementById('recent');
+    host.innerHTML = '';
+    if (!recent || !recent.length) {
+      host.appendChild(el('span', { class: 'muted', text: '暂无入库记录。' }));
+      return;
+    }
+    const table = el('table', { class: 'tbl' });
+    table.appendChild(el('thead', {}, [
+      el('tr', {}, ['id', '问法', '类型', '状态'].map((h) => el('th', { text: h }))),
+    ]));
+    const tbody = el('tbody');
+    recent.forEach((r) => {
+      const tr = el('tr', {}, [
+        el('td', { text: r.id }),
+        el('td', { text: r.questions }),
+        el('td', { text: r.content_type || '—' }),
+        el('td', {}, [pill(r.vectorize_status, r.vectorize_status === 'done' ? 'ok' : 'warn')]),
+      ]);
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    host.appendChild(table);
+  }
+
+  function chunkParams() {
+    return {
+      chunk_size: Number(document.getElementById('chunkSize').value) || 400,
+      overlap: Number(document.getElementById('overlap').value) || 0,
+      table_max_rows: Number(document.getElementById('tableRows').value) || 10,
+    };
+  }
+
+  function renderPreview(data) {
+    const counts = document.getElementById('previewCounts');
+    counts.textContent = data.counts.chunks + ' 块 · 关键条款 ' + data.counts.key_clauses +
+      ' · 表格块 ' + data.counts.table_blocks + ' · 重复 ' + data.counts.duplicates;
+    const out = document.getElementById('previewOut');
+    out.innerHTML = '';
+    if (!data.chunks.length) {
+      out.appendChild(el('span', { class: 'muted', text: '没有切出块(正文为空?)' }));
+      return;
+    }
+    data.chunks.forEach((c) => {
+      const meta = el('div', { class: 'meta' }, [
+        'section: ' + (c.section_path || '—') + ' · ' + c.content_type + ' · ' + c.answer.length + ' 字',
+      ]);
+      if (c.is_key_clause) meta.appendChild(pill('关键条款', 'warn'));
+      if (c.is_table) meta.appendChild(pill('表格块', 'ok'));
+      if (c.duplicate) meta.appendChild(pill('重复', 'bad'));
+      out.appendChild(el('div', { class: 'chunk' }, [
+        el('div', { class: 'q', text: c.questions }),
+        meta,
+        el('div', { class: 'body', text: c.answer }),
+      ]));
+    });
+  }
+
+  async function preview(payload) {
+    const body = Object.assign({}, chunkParams(), payload);
+    try {
+      const data = await getJSON('/api/kb/preview', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      renderPreview(data);
+    } catch (e) {
+      document.getElementById('previewOut').textContent = '预览失败:' + e.message;
+    }
+  }
+
+  document.getElementById('previewBtn').onclick = () => preview({
+    markdown: document.getElementById('manualMd').value,
+    content_type: document.getElementById('ctype').value,
+  });
+
+  document.getElementById('ingestBtn').onclick = async () => {
+    const msg = document.getElementById('ingestMsg');
+    msg.className = 'toast';
+    msg.textContent = '入库中…';
+    try {
+      const data = await getJSON('/api/kb/ingest', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(Object.assign({
+          markdown: document.getElementById('manualMd').value,
+          content_type: document.getElementById('ctype').value,
+          vectorize: document.getElementById('doVectorize').checked,
+        }, chunkParams())),
+      });
+      msg.className = 'toast ok';
+      msg.textContent = '入库 ' + data.inserted + ' 块,跳过重复 ' + data.skipped + ' 块,向量化 ' + data.vectorized + ' 块。';
+      loadOverview();
+    } catch (e) {
+      msg.className = 'toast bad';
+      msg.textContent = e.message;
+    }
+  };
+
+  document.getElementById('sampleBtn').onclick = () => {
+    document.getElementById('manualMd').value = '# 售后补充政策\n\n## 运费补充说明\n\n单笔订单满 99 元包邮,未满收取 10 元运费,偏远地区另计。\n\n## 客服工作时间\n\n每日 9:00-21:00 在线,其余时间留言次日回复。';
+  };
+
+  document.getElementById('vectorizeBtn').onclick = async () => {
+    const host = document.getElementById('dualStats');
+    host.textContent = '向量化中…';
+    try {
+      const data = await getJSON('/api/kb/vectorize', { method: 'POST' });
+      host.textContent = '本次向量化 ' + data.vectorized + ' 块;Milvus 现有 ' + data.milvus_count + ' 条。';
+      loadOverview();
+    } catch (e) {
+      host.textContent = '向量化失败:' + e.message;
+    }
+  };
+
+  document.getElementById('stagingBtn').onclick = async () => {
+    try {
+      const data = await getJSON('/api/kb/staging');
+      const host = document.getElementById('stagingList');
+      host.innerHTML = '';
+      const table = el('table', { class: 'tbl' }, [
+        el('thead', {}, [el('tr', {}, ['id', '批次', '问法', '答案', '状态'].map((h) => el('th', { text: h })))]),
+      ]);
+      const tbody = el('tbody');
+      (data.items || []).forEach((s) => {
+        tbody.appendChild(el('tr', {}, [
+          el('td', { text: s.id }),
+          el('td', { text: s.batch_no }),
+          el('td', { text: s.question }),
+          el('td', { text: s.answer }),
+          el('td', {}, [pill(s.status, s.status === 'discarded' ? 'bad' : (s.status === 'kept' ? 'ok' : 'warn'))]),
+        ]));
+      });
+      table.appendChild(tbody);
+      host.appendChild(table);
+    } catch (e) {
+      document.getElementById('stagingList').textContent = '读取失败:' + e.message;
+    }
+  };
+
+  async function runSearch() {
+    const out = document.getElementById('searchOut');
+    out.textContent = '检索中…';
+    try {
+      const data = await getJSON('/api/kb/search', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: document.getElementById('searchQuery').value,
+          top_k: Number(document.getElementById('searchTopK').value) || 3,
+          route: document.getElementById('searchRoute').value,
+        }),
+      });
+      out.innerHTML = '';
+      if (!data.hits.length) {
+        out.appendChild(el('span', { class: 'muted', text: '未命中(低于阈值)。' }));
+        return;
+      }
+      const table = el('table', { class: 'tbl' }, [
+        el('thead', {}, [el('tr', {}, ['#', 'id', '分数', '问法', '答案'].map((h) => el('th', { text: h })))]),
+      ]);
+      const tbody = el('tbody');
+      data.hits.forEach((h, i) => {
+        tbody.appendChild(el('tr', {}, [
+          el('td', { text: i + 1 }),
+          el('td', { text: h.id }),
+          el('td', { text: h.score.toFixed(4) }),
+          el('td', { text: h.question }),
+          el('td', { text: h.answer }),
+        ]));
+      });
+      table.appendChild(tbody);
+      out.appendChild(table);
+    } catch (e) {
+      out.textContent = '检索失败:' + e.message;
+    }
+  }
+
+  document.getElementById('searchBtn').onclick = runSearch;
+  document.querySelectorAll('[data-preset]').forEach((btn) => {
+    btn.onclick = () => {
+      document.getElementById('searchQuery').value = btn.dataset.preset;
+      runSearch();
+    };
+  });
+
+  function jobPanel(names) {
+    const wrap = el('div');
+    names.forEach((name) => {
+      const statusEl = el('span', { class: 'muted', text: '' });
+      const btn = el('button', { class: 'btn' + (name === 'kb-mine' || name === 'kb-reset' ? ' heavy' : ''), text: '重跑 ' + name });
+      const logEl = el('pre', { class: 'log', text: jobTailCache[name] || '' });
+      logEl.dataset.job = name;
+      btn.onclick = () => startJob(name, btn, statusEl, logEl);
+      wrap.appendChild(el('div', { class: 'btnrow' }, [btn, statusEl]));
+      wrap.appendChild(logEl);
+    });
+    return wrap;
+  }
+
+  async function startJob(name, btn, statusEl, logEl) {
+    if ((name === 'kb-mine' || name === 'kb-reset') && !confirm('作业 ' + name + ' 较重,确认执行?')) return;
+    btn.disabled = true;
+    statusEl.textContent = '发起中…';
+    try {
+      const st = await getJSON('/api/jobs/' + name, { method: 'POST' });
+      jobTailCache[name] = st.log_tail || jobTailCache[name] || '';
+      pollJob(name, statusEl, logEl, btn);
+    } catch (e) {
+      statusEl.textContent = '发起失败:' + e.message;
+      btn.disabled = false;
+    }
+  }
+
+  function pollJob(name, statusEl, logEl, btn) {
+    const tick = async () => {
+      try {
+        const st = await getJSON('/api/jobs/' + name);
+        jobTailCache[name] = st.log_tail || jobTailCache[name] || '';
+        logEl.textContent = jobTailCache[name] || '';
+        if (st.running) {
+          statusEl.textContent = '运行中…';
+          setTimeout(tick, 1500);
+        } else {
+          statusEl.textContent = st.exit_code === 0 ? '完成' : '结束(exit ' + st.exit_code + ')';
+          btn.disabled = false;
+          loadOverview();
+        }
+      } catch (e) {
+        statusEl.textContent = '状态读取失败:' + e.message;
+        setTimeout(tick, 2500);
+      }
+    };
+    setTimeout(tick, 800);
+  }
+
+  loadOverview();
+</script>
+</body>
+</html>
