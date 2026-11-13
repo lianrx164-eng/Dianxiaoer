@@ -42,7 +42,7 @@ def _resolve(req: PreviewRequest) -> tuple[str, str]:
 
 
 def _fingerprint(questions: str, answer: str) -> str:
-    return dedup.normalize_question(questions) + "|" + dedup.normalize_question(answer)
+    return dedup.fingerprint(questions, answer)
 
 
 def _chunk_view(c: documents.Chunk, duplicate: bool) -> dict:
@@ -83,7 +83,7 @@ async def overview() -> dict:
         milvus_count = milvus_client.count(client)
     except Exception:
         pass
-    consistent = None if (stats is None or milvus_count is None) else stats["done"] == milvus_count
+    consistent = None if (stats is None or milvus_count is None) else stats["total"] == milvus_count
 
     materials = []
     for fname, ctype in sources.SOURCE_TYPES.items():
@@ -142,14 +142,7 @@ async def ingest(req: IngestRequest) -> dict:
     chunks = _build(req, md, ctype)
 
     existing = await repository.list_chunk_pairs()
-    seen = {_fingerprint(q, a) for q, a in existing}
-    fresh: list[documents.Chunk] = []
-    for c in chunks:
-        fp = _fingerprint(c.questions, c.answer)
-        if fp in seen:
-            continue
-        seen.add(fp)
-        fresh.append(c)
+    fresh = dedup.filter_new_chunks(chunks, existing)
 
     ids = await dualwrite.write_pending(fresh) if fresh else []
     vectorized = 0
