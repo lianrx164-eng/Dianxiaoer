@@ -7,6 +7,7 @@ from app.db.models import (
     Conversation,
     Faq,
     KnowledgeChunk,
+    LowConfidenceQuestion,
     Message,
     QaExtractionStaging,
     Ticket,
@@ -257,3 +258,17 @@ async def truncate_knowledge_chunks() -> None:
         await s.execute(text("TRUNCATE TABLE knowledge_chunks"))
         await s.execute(text("SET FOREIGN_KEY_CHECKS=1"))
         await s.commit()
+
+
+async def insert_low_confidence(
+    conversation_id: int | None, raw_question: str, source: str, reason: str | None
+) -> int:
+    async with db.async_session() as s:
+        row = LowConfidenceQuestion(
+            conversation_id=conversation_id, raw_question=raw_question,
+            source=source, reason=reason,
+        )
+        s.add(row)
+        await s.commit()
+        await s.refresh(row)
+        return row.id
