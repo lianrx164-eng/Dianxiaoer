@@ -164,7 +164,7 @@ PY
 
 ### 验收映射
 
-1. **四策略报告**:`make eval-rag` 跑完 `data/ch04/reports/rag_eval.{txt,json}`,`/rag-eval` 读同一份 json,不重算。
+1. **四策略报告**:`make eval-rag` 跑完 `data/ch04/reports/rag_eval.{txt,json}`,`/rag-eval` 读同一份 json,不重算。本轮 300 题实测:混合+重排总体 MRR 0.9102 / Recall@5 0.9819(纯向量 0.8799 / 0.9701,纯 BM25 0.7964 / 0.8965);C 口语桶 MRR 0.9792 vs 纯向量 0.9222;答案覆盖度 97.3%,Faithfulness 1.0,D 桶拒答 60/60。
 2. **型号 BM25 命中**:`make eval-rag` 的 B 桶;CLI `search_knowledge('MH-W40 滤芯', strategy='bm25')` 命中型号小节。
 3. **引用可定位**:聊天页问「邮费是多少」,回答带 `[1]`,点击看到 `section_path` + 原文。
 4. **库外拒答 + 落池**:问「你们卖火星车吗」,明确拒答;`low_confidence_questions` 出现 `retrieval_low_conf` 或 `self_check` 记录。
