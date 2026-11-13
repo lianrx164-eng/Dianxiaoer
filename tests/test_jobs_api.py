@@ -1,4 +1,5 @@
 import pathlib
+import threading
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -58,3 +59,26 @@ def test_every_job_target_exists_in_makefile():
     text = pathlib.Path("Makefile").read_text(encoding="utf-8")
     for spec in jobs_core.JOBS.values():
         assert f"{spec.target}:" in text, spec
+
+
+def test_concurrent_start_only_one_wins(monkeypatch):
+    monkeypatch.setattr(
+        jobs_core.subprocess, "Popen", lambda argv, **kw: FakeProc(argv, **kw)
+    )
+    barrier = threading.Barrier(4)
+    results = []
+
+    def worker():
+        barrier.wait()
+        try:
+            jobs_core.start("kb-build")
+            results.append("ok")
+        except jobs_core.JobAlreadyRunning:
+            results.append("dup")
+
+    threads = [threading.Thread(target=worker) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert results.count("ok") == 1 and results.count("dup") == 3

@@ -68,8 +68,11 @@
     <section class="card">
       <h2>④ 向量化与双写</h2>
       <div id="dualStats" class="muted">读取中…</div>
-      <div class="btnrow"><button class="btn" id="vectorizeBtn" type="button">向量化待补块</button></div>
-      <div id="vectorJobs"></div>
+      <div class="btnrow">
+        <button class="btn" id="vectorizeBtn" type="button">向量化待补块</button>
+        <button class="btn heavy" id="resetBtn" type="button">清库重建</button>
+      </div>
+      <p class="muted">Milvus Lite 单进程独占:向量化与清库由本服务进程内执行;终端 make kb-vectorize / kb-reset 需先停服务。</p>
     </section>
   </div>
 
@@ -177,11 +180,6 @@
       host.appendChild(pill('MySQL 读不到', 'bad'));
     } else {
       host.appendChild(el('span', { class: 'muted', text: 'pending ' + k.pending + ' / done ' + k.done + ' / Milvus ' + fmt(o.milvus_count) }));
-    }
-    const jobsHost = document.getElementById('vectorJobs');
-    if (!jobsHost.dataset.ready) {
-      jobsHost.appendChild(jobPanel(['kb-vectorize', 'kb-reset']));
-      jobsHost.dataset.ready = '1';
     }
   }
 
@@ -300,6 +298,19 @@
 
   document.getElementById('sampleBtn').onclick = () => {
     document.getElementById('manualMd').value = '# 售后补充政策\n\n## 运费补充说明\n\n单笔订单满 99 元包邮,未满收取 10 元运费,偏远地区另计。\n\n## 客服工作时间\n\n每日 9:00-21:00 在线,其余时间留言次日回复。';
+  };
+
+  document.getElementById('resetBtn').onclick = async () => {
+    if (!confirm('清空知识库(MySQL + Milvus 集合),确定?')) return;
+    const host = document.getElementById('dualStats');
+    host.textContent = '清库中…';
+    try {
+      await getJSON('/api/kb/reset', { method: 'POST' });
+      host.textContent = '已清空 knowledge_chunks 与 Milvus 集合。';
+      loadOverview();
+    } catch (e) {
+      host.textContent = '清库失败:' + e.message;
+    }
   };
 
   document.getElementById('vectorizeBtn').onclick = async () => {

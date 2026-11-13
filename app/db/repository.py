@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 import app.db.base as db          # 用模块属性引用,便于测试 monkeypatch async_session
 from app.db.models import (
@@ -249,3 +249,11 @@ async def list_staging(limit: int = 200) -> list[QaExtractionStaging]:
             .limit(limit)
         )
         return list(result.scalars())
+
+
+async def truncate_knowledge_chunks() -> None:
+    async with db.async_session() as s:
+        await s.execute(text("SET FOREIGN_KEY_CHECKS=0"))
+        await s.execute(text("TRUNCATE TABLE knowledge_chunks"))
+        await s.execute(text("SET FOREIGN_KEY_CHECKS=1"))
+        await s.commit()

@@ -77,12 +77,16 @@ async def overview() -> dict:
         staging = None
 
     milvus_count = None
+    client = None
     try:
         client = milvus_client.get_client()
         milvus_client.ensure_collection(client)
         milvus_count = milvus_client.count(client)
     except Exception:
         pass
+    finally:
+        if client is not None:
+            client.close()
     consistent = None if (stats is None or milvus_count is None) else stats["total"] == milvus_count
 
     materials = []
@@ -147,6 +151,7 @@ async def ingest(req: IngestRequest) -> dict:
     ids = await dualwrite.write_pending(fresh) if fresh else []
     vectorized = 0
     if req.vectorize and ids:
+        client = None
         try:
             client = milvus_client.get_client()
             milvus_client.ensure_collection(client)
@@ -156,12 +161,16 @@ async def ingest(req: IngestRequest) -> dict:
                 status_code=502,
                 detail=f"已入库 {len(ids)} 块(pending),补跑一次即可:向量化失败:{exc}",
             ) from exc
+        finally:
+            if client is not None:
+                client.close()
     return {"inserted": len(ids), "skipped": len(chunks) - len(ids),
             "vectorized": vectorized, "ids": ids}
 
 
 @router.post("/vectorize")
 async def vectorize() -> dict:
+    client = None
     try:
         client = milvus_client.get_client()
         milvus_client.ensure_collection(client)
@@ -169,7 +178,28 @@ async def vectorize() -> dict:
         total = milvus_client.count(client)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"向量化失败,补跑一次即可:{exc}") from exc
+    finally:
+        if client is not None:
+            client.close()
     return {"vectorized": n, "milvus_count": total}
+
+
+@router.post("/reset")
+async def reset() -> dict:
+    """清库重建:drop Milvus 集合 + TRUNCATE knowledge_chunks。
+    Milvus Lite 单进程独占数据目录,所以清库必须在本进程内做,不能走 make 子进程。"""
+    client = None
+    try:
+        client = milvus_client.get_client()
+        if client.has_collection(milvus_client.COLLECTION):
+            client.drop_collection(milvus_client.COLLECTION)
+        await repository.truncate_knowledge_chunks()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"清库失败:{exc}") from exc
+    finally:
+        if client is not None:
+            client.close()
+    return {"reset": True}
 
 
 @router.post("/search")

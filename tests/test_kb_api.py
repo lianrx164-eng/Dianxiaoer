@@ -52,3 +52,27 @@ async def test_preview_rejects_bad_input(client, db_session_factory, db_clean):
     for payload in bad_payloads:
         r = await client.post("/api/kb/preview", json=payload)
         assert r.status_code == 400, payload
+
+
+async def test_reset_clears_mysql_and_milvus(client, db_session_factory, db_clean, monkeypatch):
+    await repository.insert_knowledge_chunk("c", "q", "a")
+
+    class FakeMilvus:
+        def __init__(self):
+            self.dropped = []
+
+        def has_collection(self, name):
+            return True
+
+        def drop_collection(self, name):
+            self.dropped.append(name)
+
+        def close(self):
+            pass
+
+    fake = FakeMilvus()
+    monkeypatch.setattr("app.api.kb.milvus_client.get_client", lambda: fake)
+    r = await client.post("/api/kb/reset")
+    assert r.status_code == 200
+    assert fake.dropped == ["knowledge"]
+    assert (await repository.knowledge_stats())["total"] == 0

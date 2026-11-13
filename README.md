@@ -105,9 +105,10 @@ PY
     make seed-conv         # 合成历史客服对话(幂等)
     make kb-mine           # 对话挖 QA → staging → 去重 → pending
     make eval-mining       # 抽取质量评估
-    make kb-reset          # 清空 knowledge_chunks + drop Milvus 集合(重建前用)
+    make kb-reset          # 清空 knowledge_chunks + drop Milvus 集合(重建前用;需先停服务)
 
 > 作业按钮与 Makefile 是同一份配方;本机若没有 `make`,先安装 GNU make(`winget install --id ezwinports.make -e`)。
+> Milvus Lite 对数据目录是进程级独占:服务跑着时,**向量化与清库走页面/API**(`/api/kb/vectorize`、`/api/kb/reset`),终端 `make kb-vectorize` / `make kb-reset` 需先停 dev server;`kb-preview / kb-build / kb-mine / seed-conv` 不受影响。
 
 ### 页面
 
