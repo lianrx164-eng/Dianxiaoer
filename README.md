@@ -75,3 +75,52 @@ PY
 ### 测试
 
     uv run pytest -v   # 需 MySQL 在跑;conftest 自动重建 mewhelp_test 库并从 sql/ch02-ddl.sql 建表
+
+---
+
+## Ch03:知识库向量语义检索(RAG 基础)
+
+把 `query_faq` 的内部实现从关键词查表升级为 dense 向量检索(阿里云百炼 `text-embedding-v4` + Milvus Lite),工具入参出参契约不变;MySQL 存原文权威源并记录双写状态,离线建库与录入页都在仓库里。
+
+### 配置
+
+`.env` 增加嵌入那一组(密钥只存本地):
+
+    EMBED_BASE_URL=https://maas.qianwenaiapi.com/compatible-mode/v1
+    EMBED_MODEL=text-embedding-v4
+    EMBED_API_KEY=sk-xxx
+
+数据库:在已建好的 `mewhelp_ch02` 库上补 ch03 两张表:
+
+    mysql -uroot -p --default-character-set=utf8mb4 mewhelp_ch02 < sql/ch03-ddl.sql
+
+脚本方式(无 mysql CLI 时):用 SQLAlchemy 执行 `sql/ch03-ddl.sql`,语句切分复用 `app/db/sql_script.py`。
+
+### 建库与检索
+
+    make kb-preview        # dry-run:按材料清单切块并打印各文件结果
+    make kb-build          # data/kb/*.md → knowledge_chunks(pending)
+    make kb-vectorize      # pending → 嵌入 → Milvus,回填 done(幂等可重跑)
+    make eval-retrieval    # 换说法召回评估(验收 1)
+    make seed-conv         # 合成历史客服对话(幂等)
+    make kb-mine           # 对话挖 QA → staging → 去重 → pending
+    make eval-mining       # 抽取质量评估
+    make kb-reset          # 清空 knowledge_chunks + drop Milvus 集合(重建前用)
+
+> 作业按钮与 Makefile 是同一份配方;本机若没有 `make`,先安装 GNU make(`winget install --id ezwinports.make -e`)。
+
+### 页面
+
+- `/` 聊天页:问「邮费是多少」会触发 `query_faq`,召回运费条款并作答(验收 1)
+- `/kb` 知识库录入:库存闸条、手工录入与切块预览、材料清单、挖知识暂存、向量化补 pending、检索自测、最近入库
+- `/admin` 后台聚合首页:四张卡,某块依赖不可用只让自己显示「读数失败」
+
+### 验收
+
+1. **换说法召回**:`make eval-retrieval` 5/5;`/kb` ⑤ 检索自测「邮费是多少」Top-1 为「运费怎么算」;聊天页问同一句能看到工具徽章与包邮规则。
+2. **中断重跑**:`tests/test_dualwrite.py::test_vectorize_resumes_after_crash`(注入第 2 批嵌入失败 → 重跑只捡 pending);页面 ④ 区「向量化待补块」与闸条三数对齐。
+3. **建库全链**:`/kb` ① 贴一段正文 → 切块预览 → 入库并向量化 → 重录同一段显示「跳过重复」;`kb-preview / kb-build / kb-mine / kb-vectorize` 在页面上按得动,日志尾可读。
+
+### 测试
+
+    uv run pytest -q   # 需 MySQL 在跑;conftest 从 ch02/ch03 DDL 重建 mewhelp_test,单测不打真实嵌入 API

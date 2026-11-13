@@ -48,7 +48,11 @@ async def _staging_card() -> dict:
         total = sum(stats["counts"].values())
         status = "没数据" if total == 0 else "正常"
         return _card("staging", "对话挖知识暂存", "/kb", status,
-                     f"共 {total} 条,保留 {stats['counts']['kept']} 条", stats)
+                     f"共 {total} 条,保留 {stats['counts']['kept']} 条",
+                     {"extracted": stats["counts"]["extracted"],
+                      "kept": stats["counts"]["kept"],
+                      "discarded": stats["counts"]["discarded"],
+                      "batches": stats["batches"]})
     except Exception:
         return _card("staging", "对话挖知识暂存", "/kb", "读数失败", "MySQL 读不到", {})
 
