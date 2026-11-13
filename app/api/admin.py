@@ -74,12 +74,12 @@ async def _jobs_card() -> dict:
 
 async def _rageval_card() -> dict:
     from app.api import rageval
-    report = rageval._load()
+    report = rageval.load_report()
     if report is None:
         return _card("rag-eval", "RAG 评估", "/rag-eval", "没跑过",
                      "还没有评估报告,先跑一次 make eval-rag", {})
     meta = report.get("meta") or {}
-    best = rageval._best(report.get("retrieval") or {})
+    best = rageval.best_strategy(report.get("retrieval") or {})
     refusal = ((report.get("generation") or {}).get("refusal") or {}).get("rate")
     return _card(
         "rag-eval", "RAG 评估", "/rag-eval", "正常",

@@ -25,6 +25,14 @@ def _load() -> dict | None:
         return None
 
 
+def load_report() -> dict | None:
+    return _load()
+
+
+def best_strategy(retrieval: dict) -> dict | None:
+    return _best(retrieval)
+
+
 def _best(retrieval: dict) -> dict | None:
     scored = [(name, cell.get("overall", {}).get("mrr"))
               for name, cell in retrieval.items() if isinstance(cell, dict)]
