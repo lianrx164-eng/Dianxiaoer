@@ -53,12 +53,13 @@ def ensure_collection(client: MilvusClient, collection: str = COLLECTION) -> Non
         return
     if client.has_collection(collection):
         if not _schema_compatible(client, collection):
-            client.drop_collection(collection)
-        else:
-            client.load_collection(collection)
-            if client is _CLIENT:
-                _ensured.add(collection)
-            return
+            raise RuntimeError(
+                f"Milvus 集合 {collection} 是旧 schema(缺 dense/text/sparse);"
+                "请先 make kb-reset,再 make kb-build && make kb-vectorize")
+        client.load_collection(collection)
+        if client is _CLIENT:
+            _ensured.add(collection)
+        return
 
     schema = client.create_schema(auto_id=False)
     schema.add_field("id", DataType.INT64, is_primary=True)
@@ -105,10 +106,6 @@ def upsert_vectors(client: MilvusClient, rows: list[dict],
                    collection: str = COLLECTION) -> None:
     if rows:
         client.upsert(collection, [_normalize_row(r) for r in rows])
-
-
-def flush(client: MilvusClient, collection: str = COLLECTION) -> None:
-    client.flush(collection)
 
 
 def _cat_expr(category: str | None) -> str:

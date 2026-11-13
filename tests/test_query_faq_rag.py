@@ -80,3 +80,22 @@ async def test_query_faq_expands_bm25_only(monkeypatch):
     await business.query_faq.ainvoke({"keyword": "邮费多少"})
     assert seen["query"] == "标准问法"
     assert "运费" in seen["bm25_query"] and "邮费" in seen["bm25_query"]
+
+
+@pytest.mark.asyncio
+async def test_query_faq_retries_without_bad_category(monkeypatch):
+    _patch_understand(monkeypatch)
+    calls = []
+
+    async def fake_search(query, **kw):
+        calls.append(kw.get("category"))
+        return [] if kw.get("category") else [_hit(1, 0.9)]
+
+    async def fake_check(q, texts):
+        return {"useful": True, "reason": "够"}
+
+    monkeypatch.setattr("app.core.retrieval.search_knowledge", fake_search)
+    monkeypatch.setattr("app.core.selfcheck.check_sufficient", fake_check)
+    out = await business.query_faq.ainvoke({"keyword": "运费", "category": "运费"})
+    assert calls == ["运费", None]
+    assert out["sufficient"] is True

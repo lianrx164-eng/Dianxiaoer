@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field
 
 from app.config import settings
-from app.core.llm import get_chat_model
+from app.core.llm import get_chat_model, structured_model
 from app.core.prompts import FAITHFULNESS_PROMPT
 
 
@@ -21,8 +21,8 @@ def judge_model(temperature: float = 0.0, model=None):
 async def judge_faithfulness(evidence: str, answer: str,
                              model=None, temperature: float = 0.0) -> tuple[bool, str]:
     """忠实度裁判。temperature 默认 0,减少同一输入的判分抖动。"""
-    chain = FAITHFULNESS_PROMPT | judge_model(temperature, model).with_structured_output(
-        FaithVerdict, method="function_calling")
+    chain = FAITHFULNESS_PROMPT | structured_model(
+        FaithVerdict, temperature=temperature, model=model)
     r: FaithVerdict = await chain.ainvoke({"evidence": evidence, "answer": answer})
     return bool(r.faithful), r.reason or ""
 

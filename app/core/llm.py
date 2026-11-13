@@ -20,3 +20,13 @@ def get_chat_model(
         max_retries=1,
         extra_body=extra_body,
     )
+
+
+def structured_model(schema, temperature: float = 0.3, model=None):
+    """结构化输出统一入口:扁平 schema + function_calling + 关闭上游思考模式。"""
+    if model is not None:
+        return model.with_structured_output(schema, method="function_calling")
+    extra = ({"thinking": {"type": settings.extract_thinking}}
+             if settings.extract_thinking else None)
+    return get_chat_model(extra_body=extra, temperature=temperature).with_structured_output(
+        schema, method="function_calling")

@@ -63,7 +63,8 @@ async def query_logistics(order_id: str) -> dict:
 class FaqInput(BaseModel):
     keyword: str = Field(description="用户咨询的政策/规则/操作类问题(可用原话)")
     category: str | None = Field(
-        default=None, description="可选:按品类过滤,如『运费』『退货』『商品手册』")
+        default=None,
+        description="可选:知识库一级分类,如『商品与购物 FAQ』『退货退款政策』『售后手册』『商品规格手册』")
 
 
 @tool(args_schema=FaqInput)
@@ -76,6 +77,10 @@ async def query_faq(keyword: str, category: str | None = None) -> dict:
 
     hits = await retrieval.search_knowledge(
         query, strategy="hybrid_rerank", category=category, bm25_query=bm25_query)
+    if category and not hits:
+        # 模型给的分类名不是库里的精确 category 时,退回全库检索,避免误拒答
+        hits = await retrieval.search_knowledge(
+            query, strategy="hybrid_rerank", bm25_query=bm25_query)
 
     top = hits[0].get("rerank_score", 0.0) if hits else 0.0
     if not hits or top < settings.rerank_min_score:
@@ -90,7 +95,8 @@ async def query_faq(keyword: str, category: str | None = None) -> dict:
 
     arranged = retrieval.arrange_head_tail(hits)
     citations = [
-        {"n": i + 1, "id": h["id"], "section_path": h["section_path"],
+        {"n": i + 1, "id": h["id"], "chunk_id": h["id"],
+         "section_path": h["section_path"],
          "question": h["question"], "answer": h["answer"],
          "content_type": h["content_type"]}
         for i, h in enumerate(arranged)

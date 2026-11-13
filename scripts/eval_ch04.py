@@ -20,11 +20,9 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from app.config import settings
-from app.core import embeddings, retrieval
+from app.core import embeddings, judges, retrieval
 from app.core.llm import get_chat_model
-from app.core.prompts import (
-    ANSWER_COVERAGE_PROMPT, FAITHFULNESS_PROMPT, RAG_ANSWER_PROMPT,
-)
+from app.core.prompts import ANSWER_COVERAGE_PROMPT, RAG_ANSWER_PROMPT
 from app.db import repository
 from app.kb import milvus_client
 
@@ -48,11 +46,6 @@ _LINES: list[str] = []
 
 class _Coverage(BaseModel):
     covered: list[int] = Field(default_factory=list, description="被覆盖要点序号")
-
-
-class _Faith(BaseModel):
-    faithful: bool = Field(description="回答是否被证据支撑")
-    reason: str = Field(default="", description="判断依据")
 
 
 def _norm(s: str) -> str:
@@ -139,12 +132,6 @@ def _citations(hits: list[dict]) -> list[dict]:
             for i, h in enumerate(hits[:TOP_K], 1)]
 
 
-def _judge_model():
-    extra = ({"thinking": {"type": settings.extract_thinking}}
-             if settings.extract_thinking else None)
-    return get_chat_model(extra_body=extra, temperature=0)
-
-
 async def _try(coro, label: str):
     try:
         return await asyncio.wait_for(coro, CALL_TIMEOUT)
@@ -161,23 +148,18 @@ async def _gen_answer(query: str, hits: list[dict]) -> str:
 
 
 async def _judge_coverage(points: list[str], answer: str) -> float:
-    model = _judge_model().with_structured_output(_Coverage, method="function_calling")
+    model = judges.judge_model().with_structured_output(
+        _Coverage, method="function_calling")
     prompt = "\n".join(f"{i}. {p}" for i, p in enumerate(points, 1))
     r: _Coverage = await (ANSWER_COVERAGE_PROMPT | model).ainvoke(
         {"points": prompt, "answer": answer})
     return len(set(r.covered)) / len(points) if points else 0.0
 
 
-async def _judge_faith(evidence: str, answer: str) -> tuple[bool, str]:
-    model = _judge_model().with_structured_output(_Faith, method="function_calling")
-    r: _Faith = await (FAITHFULNESS_PROMPT | model).ainvoke(
-        {"evidence": evidence, "answer": answer})
-    return bool(r.faithful), r.reason or ""
-
-
 def _is_refusal(answer: str) -> bool:
-    markers = ["没有查到", "未查到", "无法", "不能", "不支持", "暂无", "未找到",
-               "无相关信息", "建议联系", "联系人工", "暂时没有", "不清楚", "抱歉"]
+    markers = ["没有查到", "未查到", "未找到", "暂无相关", "无相关信息",
+               "无法回答", "不能回答", "建议联系", "转人工", "联系人工",
+               "暂时没有", "不清楚"]
     return any(m in answer for m in markers)
 
 
@@ -222,7 +204,7 @@ async def _generation(samples: list[dict], d_samples: list[dict],
             row = {"id": sample["id"], "bucket": sample["bucket"], "strategy": strategy,
                    "coverage": coverage, "answer": answer}
             if strategy == "hybrid_rerank":
-                faith = await _try(_judge_faith(_evidence(hits), answer),
+                faith = await _try(judges.judge_faithfulness(_evidence(hits), answer),
                                    f"faith:{sample['id']}")
                 if faith is not None:
                     row["faithful"], row["reason"] = faith

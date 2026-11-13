@@ -52,6 +52,19 @@ def _faq_result(runs: list[ToolRun]) -> dict | None:
     return None
 
 
+async def _faq_gate(runs: list[ToolRun], conversation_id: int,
+                    message: str) -> tuple[list[dict], list[BaseMessage]]:
+    """query_faq 结果的两道闸:足则给出引用;不足则落低置信池并加拒答指令。"""
+    faq = _faq_result(runs)
+    if faq is None:
+        return [], []
+    if faq.get("sufficient"):
+        return faq.get("citations", []), []
+    await repository.insert_low_confidence(
+        conversation_id, message, faq.get("source", "self_check"), faq.get("reason"))
+    return [], [REFUSAL_NOTE]
+
+
 def _text(msg: AIMessage) -> str:
     if isinstance(msg.content, str):
         return msg.content
@@ -115,17 +128,7 @@ async def run_agent_turn(user_id, message, conversation_id, model=None) -> Agent
     if not ai.tool_calls:
         return AgentResult(conversation_id, _text(ai), [], [])
     runs = await _execute_tools(conversation_id, ai.tool_calls)
-    faq = _faq_result(runs)
-    citations: list[dict] = []
-    extra: list[BaseMessage] = []
-    if faq is not None:
-        if faq.get("sufficient"):
-            citations = faq.get("citations", [])
-        else:
-            await repository.insert_low_confidence(
-                conversation_id, message, faq.get("source", "self_check"),
-                faq.get("reason"))
-            extra.append(REFUSAL_NOTE)
+    citations, extra = await _faq_gate(runs, conversation_id, message)
     final: AIMessage = await model.ainvoke(         # 收敛:不 bind_tools
         [*messages, ai, *(r.tool_message for r in runs), *extra, CONVERGENCE_GUARD])
     await repository.append_message(conversation_id, "assistant", content=_text(final))
@@ -152,17 +155,9 @@ async def stream_agent_turn(
 
     runs = await _execute_tools(conversation_id, ai.tool_calls)
 
-    faq = _faq_result(runs)
-    extra: list[BaseMessage] = []
-    if faq is not None:
-        if faq.get("sufficient"):
-            if faq.get("citations"):
-                yield {"type": "citations", "items": faq["citations"]}
-        else:
-            await repository.insert_low_confidence(
-                conversation_id, message, faq.get("source", "self_check"),
-                faq.get("reason"))
-            extra.append(REFUSAL_NOTE)
+    citations, extra = await _faq_gate(runs, conversation_id, message)
+    if citations:
+        yield {"type": "citations", "items": citations}
 
     chunks: list[str] = []
     async for chunk in model.astream(

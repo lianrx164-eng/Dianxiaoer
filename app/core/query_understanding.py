@@ -1,7 +1,6 @@
 from pydantic import BaseModel, Field
 
-from app.config import settings
-from app.core.llm import get_chat_model
+from app.core.llm import structured_model
 from app.core.prompts import QUERY_REWRITE_PROMPT
 
 
@@ -11,12 +10,7 @@ class _Rewrite(BaseModel):
 
 
 def _chain(model=None):
-    if model is None:
-        extra = ({"thinking": {"type": settings.extract_thinking}}
-                 if settings.extract_thinking else None)
-        model = get_chat_model(extra_body=extra)
-    return QUERY_REWRITE_PROMPT | model.with_structured_output(
-        _Rewrite, method="function_calling")
+    return QUERY_REWRITE_PROMPT | structured_model(_Rewrite, model=model)
 
 
 async def understand(query: str, model=None) -> dict:

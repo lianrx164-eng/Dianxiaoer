@@ -180,29 +180,31 @@
     panel.append(el('div', { class: 'panel-head' }, [
       el('span', { class: 'num', text: '2' }),
       el('h2', { text: '完整数据' }),
-      el('span', { class: 'hint', text: '当前指标:' + (METRICS.find(m => m[0] === metric) || [])[1] }),
+      el('span', { class: 'hint', text: '分桶 MRR + 两项覆盖度;总体 MRR 最佳行带底色' }),
     ]));
     const body = el('div', { class: 'panel-body' });
     const table = el('table', { class: 'tbl' });
     const thead = el('thead');
     const hr = el('tr');
     hr.append(el('th', { text: '策略' }));
-    BUCKETS.forEach(b => hr.append(el('th', { class: 'num', text: b[1] })));
-    hr.append(el('th', { class: 'num', text: '总体' }));
+    BUCKETS.forEach(b => hr.append(el('th', { class: 'num', text: b[1] + ' MRR' })));
+    ['总体 MRR', '总体 Recall@5', '总体证据覆盖度'].forEach(h =>
+      hr.append(el('th', { class: 'num', text: h })));
     thead.append(hr);
     table.append(thead);
     const tbody = el('tbody');
-    const vals = [];
     STRATS.forEach(function (s) {
       const tr = el('tr');
+      if (data.best && data.best.strategy === s[0]) {
+        tr.style.background = '#ffe9c2';
+      }
       tr.append(el('td', { text: s[1] }));
       BUCKETS.forEach(function (b) {
-        const v = metricValue(s[0], b[0], metric);
-        vals.push(v);
-        tr.append(el('td', { class: 'num', text: metric === 'mrr' ? num(v) : pct(v) }));
+        tr.append(el('td', { class: 'num', text: num(metricValue(s[0], b[0], 'mrr')) }));
       });
-      const ov = overallValue(s[0], metric);
-      tr.append(el('td', { class: 'num', text: metric === 'mrr' ? num(ov) : pct(ov) }));
+      tr.append(el('td', { class: 'num', text: num(overallValue(s[0], 'mrr')) }));
+      tr.append(el('td', { class: 'num', text: pct(overallValue(s[0], 'recall@5')) }));
+      tr.append(el('td', { class: 'num', text: pct(overallValue(s[0], 'coverage')) }));
       tbody.append(tr);
     });
     table.append(tbody);
