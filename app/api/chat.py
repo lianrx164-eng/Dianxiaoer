@@ -39,6 +39,8 @@ async def chat(req: ChatRequest, model: BaseChatModel = Depends(get_model)):
                     yield _sse({"event": "tool", "name": ev["name"]})
                 elif ev["type"] == "delta":
                     yield _sse({"delta": ev["text"]})
+                elif ev["type"] == "citations":
+                    yield _sse({"event": "citations", "items": ev["items"]})
                 elif ev["type"] == "done":
                     yield _sse({"event": "done", "conversation_id": ev["conversation_id"]})
         except Exception as exc:  # noqa: BLE001 - 统一映射,流已发 200 错误只能走帧

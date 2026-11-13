@@ -1,6 +1,7 @@
 import asyncio
+import json
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
@@ -26,6 +27,11 @@ CONVERGENCE_GUARD = SystemMessage(
     "不要再调用任何工具。"
 )
 
+REFUSAL_NOTE = SystemMessage(
+    "知识库检索证据不足,不能回答这个问题。请明确告知用户「暂时没有查到相关信息」,"
+    "并建议用户联系 App 内人工客服;不要依据常识或猜测编造答案。"
+)
+
 
 @dataclass
 class AgentResult:
@@ -33,6 +39,17 @@ class AgentResult:
     answer: str
     tool_calls: list[dict]
     tool_runs: list[ToolRun]
+    citations: list[dict] = field(default_factory=list)
+
+
+def _faq_result(runs: list[ToolRun]) -> dict | None:
+    for r in runs:
+        if getattr(r, "name", None) == "query_faq":
+            try:
+                return json.loads(r.tool_message.content)
+            except (ValueError, TypeError):
+                return None
+    return None
 
 
 def _text(msg: AIMessage) -> str:
@@ -98,10 +115,21 @@ async def run_agent_turn(user_id, message, conversation_id, model=None) -> Agent
     if not ai.tool_calls:
         return AgentResult(conversation_id, _text(ai), [], [])
     runs = await _execute_tools(conversation_id, ai.tool_calls)
+    faq = _faq_result(runs)
+    citations: list[dict] = []
+    extra: list[BaseMessage] = []
+    if faq is not None:
+        if faq.get("sufficient"):
+            citations = faq.get("citations", [])
+        else:
+            await repository.insert_low_confidence(
+                conversation_id, message, faq.get("source", "self_check"),
+                faq.get("reason"))
+            extra.append(REFUSAL_NOTE)
     final: AIMessage = await model.ainvoke(         # 收敛:不 bind_tools
-        [*messages, ai, *(r.tool_message for r in runs), CONVERGENCE_GUARD])
+        [*messages, ai, *(r.tool_message for r in runs), *extra, CONVERGENCE_GUARD])
     await repository.append_message(conversation_id, "assistant", content=_text(final))
-    return AgentResult(conversation_id, _text(final), ai.tool_calls, runs)
+    return AgentResult(conversation_id, _text(final), ai.tool_calls, runs, citations)
 
 
 async def stream_agent_turn(
@@ -124,9 +152,21 @@ async def stream_agent_turn(
 
     runs = await _execute_tools(conversation_id, ai.tool_calls)
 
+    faq = _faq_result(runs)
+    extra: list[BaseMessage] = []
+    if faq is not None:
+        if faq.get("sufficient"):
+            if faq.get("citations"):
+                yield {"type": "citations", "items": faq["citations"]}
+        else:
+            await repository.insert_low_confidence(
+                conversation_id, message, faq.get("source", "self_check"),
+                faq.get("reason"))
+            extra.append(REFUSAL_NOTE)
+
     chunks: list[str] = []
     async for chunk in model.astream(
-        [*messages, ai, *(r.tool_message for r in runs), CONVERGENCE_GUARD]
+        [*messages, ai, *(r.tool_message for r in runs), *extra, CONVERGENCE_GUARD]
     ):
         text = chunk.content if isinstance(chunk.content, str) else _text(chunk)
         if not text:
