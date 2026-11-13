@@ -1,4 +1,4 @@
-.PHONY: dev test eval seed eval-agent kb-build kb-vectorize kb-mine eval-retrieval
+.PHONY: dev test eval seed eval-agent kb-build kb-vectorize kb-mine eval-retrieval seed-conv eval-mining
 
 dev:
 	./scripts/dev.sh
@@ -29,3 +29,10 @@ kb-mine:
 
 eval-retrieval:
 	PYTHONPATH=. uv run python scripts/eval_retrieval.py
+
+# 合成历史对话种子(喂挖知识 job)
+seed-conv:
+	uv run python scripts/seed_db.py sql/ch03-seed.sql
+
+eval-mining:
+	PYTHONPATH=. uv run python scripts/eval_mining.py

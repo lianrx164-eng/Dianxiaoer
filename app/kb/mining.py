@@ -28,7 +28,10 @@ def _mining_model():
 
 async def extract_qa(conversation_texts: list[str], model=None) -> list[QaPair]:
     model = model or _mining_model()
-    chain = MINING_PROMPT | model.with_structured_output(QaExtraction)
+    # 上游 DeepSeek 不支持 json_schema 的 response_format,走 function_calling(ch01 已验证)
+    chain = MINING_PROMPT | model.with_structured_output(
+        QaExtraction, method="function_calling"
+    )
     result: QaExtraction = await chain.ainvoke({"conversations": "\n---\n".join(conversation_texts)})
     return result.pairs if result else []
 
