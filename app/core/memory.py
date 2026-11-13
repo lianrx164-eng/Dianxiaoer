@@ -1,5 +1,9 @@
+import logging
+
 from langchain_core.messages import BaseMessage
 from langchain_core.messages.utils import count_tokens_approximately, trim_messages
+
+logger = logging.getLogger(__name__)
 
 
 class SessionStore:
@@ -16,7 +20,7 @@ class SessionStore:
 
 
 def trim_history(messages: list[BaseMessage], max_tokens: int) -> list[BaseMessage]:
-    return trim_messages(
+    trimmed = trim_messages(
         messages,
         strategy="last",
         token_counter=count_tokens_approximately,
@@ -24,3 +28,10 @@ def trim_history(messages: list[BaseMessage], max_tokens: int) -> list[BaseMessa
         start_on="human",
         allow_partial=False,
     )
+    if not trimmed and messages:
+        # 预算放不下任何完整的轮次时,至少保留最新一条,不能把当前问题裁没
+        logger.warning(
+            "token 预算 %s 小于单条消息,仅保留最新一条(size=%s)", max_tokens, len(messages)
+        )
+        trimmed = [messages[-1]]
+    return trimmed

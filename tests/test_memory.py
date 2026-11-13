@@ -29,3 +29,11 @@ def test_trim_keeps_recent_and_starts_on_human():
 def test_trim_noop_when_under_budget():
     msgs = [HumanMessage("hi"), AIMessage("hello")]
     assert trim_history(msgs, max_tokens=2000) == msgs
+
+
+def test_trim_keeps_latest_message_when_it_alone_exceeds_budget():
+    # 单条消息超预算时不能把整段历史裁空:当前问题(最后一条 human)必须保留
+    msgs = [HumanMessage("hi"), AIMessage("hello"), HumanMessage("长" * 9000)]
+    trimmed = trim_history(msgs, max_tokens=2000)
+    assert trimmed == [msgs[-1]]
+

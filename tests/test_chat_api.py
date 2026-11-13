@@ -65,3 +65,50 @@ def test_chat_validates_empty_message():
         client.post("/api/chat", json={"session_id": "s3", "message": ""}).status_code
         == 422
     )
+
+
+class ErrorModel:
+    async def astream(self, messages):
+        raise RuntimeError("upstream down")
+        yield  # pragma: no cover
+
+
+class RecordingModel:
+    def __init__(self, reply: str):
+        self.reply = reply
+        self.calls: list[list] = []
+
+    async def astream(self, messages):
+        self.calls.append(messages)
+        from langchain_core.messages import AIMessageChunk
+
+        yield AIMessageChunk(content=self.reply)
+
+
+def test_chat_emits_error_frame_and_keeps_store_clean():
+    app.dependency_overrides[chat_api.get_model] = lambda: ErrorModel()
+    client = TestClient(app)
+    with client.stream(
+        "POST", "/api/chat", json={"session_id": "s4", "message": "在吗"}
+    ) as r:
+        lines = list(r.iter_lines())
+    assert "event: error" in lines
+    assert any(line.startswith("data: ") and "上游" in line for line in lines)
+    assert "data: [DONE]" not in lines
+    assert chat_api.store.get("s4") == []
+
+
+def test_chat_second_turn_receives_first_turn_context():
+    model = RecordingModel("好的")
+    app.dependency_overrides[chat_api.get_model] = lambda: model
+    client = TestClient(app)
+    for msg in ("第一问", "第二问"):
+        with client.stream(
+            "POST", "/api/chat", json={"session_id": "s5", "message": msg}
+        ) as r:
+            list(r.iter_lines())
+    second_call_contents = [m.content for m in model.calls[1]]
+    assert second_call_contents[0] != "第一问"  # 首条是 system prompt
+    assert "第一问" in second_call_contents
+    assert "好的" in second_call_contents
+    assert second_call_contents[-1] == "第二问"

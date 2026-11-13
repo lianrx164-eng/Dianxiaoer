@@ -10,3 +10,9 @@ def test_factory_points_to_chat_upstream():
 
 def test_factory_streaming_flag():
     assert get_chat_model(streaming=True).streaming is True
+
+
+def test_factory_bounds_upstream_timeouts():
+    m = get_chat_model()
+    assert m.request_timeout == 60
+    assert m.max_retries == 1

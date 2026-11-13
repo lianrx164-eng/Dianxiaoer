@@ -9,16 +9,31 @@ FastAPI + LangChain,模型上游直连。
 
 ## 验收
 
-    # 1. 流式对话
-    curl -sN http://localhost:8000/api/chat -H 'Content-Type: application/json' \
-      -d '{"session_id": "s1", "message": "你们卖猫粮吗?"}'
+> Git Bash / GBK 终端里直接 `curl -d '{"message":"中文"}'` 会被终端转码成非 UTF-8,服务返回 `400 There was an error parsing the body`。含中文的请求用下面的 `uv run python`(httpx 按 UTF-8 编码),或把 JSON 存成 UTF-8 文件再用 `curl --data-binary @body.json`。
 
-    # 2. 两轮上下文
-    bash scripts/demo_chat.sh
+```bash
+# 1. 流式对话(逐 token)
+uv run python - <<'PY'
+import httpx
+with httpx.stream("POST", "http://localhost:8000/api/chat",
+                  json={"session_id": "s1", "message": "你们卖猫粮吗?"},
+                  timeout=120) as r:
+    for line in r.iter_lines():
+        print(line)
+PY
 
-    # 3. 结构化提取
-    curl -s http://localhost:8000/api/extract -H 'Content-Type: application/json' \
-      -d '{"text": "订单 MH20260701123 的猫爬架散架了,我要退款"}'
+# 2. 两轮上下文
+bash scripts/demo_chat.sh
+
+# 3. 结构化提取
+uv run python - <<'PY'
+import httpx
+r = httpx.post("http://localhost:8000/api/extract",
+               json={"text": "订单 MH20260701123 的猫爬架散架了,我要退款"},
+               timeout=120)
+print(r.json())
+PY
+```
 
 ## 测试
 
