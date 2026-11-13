@@ -11,89 +11,138 @@
 <body class="admin-page">
 <div id="admin-nav"></div>
 <main class="admin-shell">
-  <h1 class="admin-title">知识库录入</h1>
-  <p class="admin-sub">切块只有一份实现:页面预览、入库与 CLI 都调 app/kb/documents.build_chunks;材料清单只在 app/kb/sources.py。</p>
 
-  <section class="card">
-    <h2>库存闸条 <span class="hint">读不到与对不上是两回事</span></h2>
-    <div class="gate" id="gate"><span class="muted">读取中…</span></div>
+  <header class="page-head">
+    <div>
+      <h1>知识库录入</h1>
+      <p class="sub">贴一段文档就能进库:切块 <span class="arrow">→</span> 双写 MySQL 与 Milvus <span class="arrow">→</span> 现场检索自测</p>
+    </div>
+    <button class="btn" id="refreshBtn" type="button">刷新</button>
+  </header>
+
+  <section class="stats" id="stats">
+    <div class="tile"><b>—</b><span>知识块(MySQL)</span></div>
   </section>
 
-  <div class="grid">
-    <section class="card">
-      <h2>① 手工录入</h2>
+  <div class="callout">
+    两条路:<span class="chip c-source">手工录入</span>正文贴在这页上,预览什么样就入库什么样;
+    <span class="chip c-source">离线建库</span>把 <span class="mono">data/kb/</span> 那几份材料交给 make 目标跑,页面按的和终端敲的是同一条命令。
+    两条路共用一套切块逻辑与双写顺序——先写 MySQL 记「待向量化」,再进 Milvus 回填「已向量化」,中途挂了重跑捡 pending 就能补齐。
+  </div>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div class="num">1</div>
+      <h2>手工录入</h2>
+      <span class="chip c-source">正文贴这里</span>
+      <span class="hint">按标题层级切、超长递归切、块间重叠裁到最近句号、大表格按行拆并复制表头</span>
+      <div class="actions">
+        <button class="btn" id="sampleBtn" type="button">填一段示例</button>
+        <button class="btn" id="clearBtn" type="button">清空</button>
+      </div>
+    </div>
+    <div class="panel-body">
       <div class="row">
-        <label>内容类型<select id="ctype">
-          <option value="policy">policy 政策</option>
-          <option value="faq">faq 常见问题</option>
-          <option value="manual">manual 手册</option>
-        </select></label>
+        <label>内容类型
+          <select id="ctype">
+            <option value="policy">policy 政策</option>
+            <option value="faq">faq 常见问题</option>
+            <option value="manual">manual 手册</option>
+          </select>
+        </label>
         <label>chunk_size<input id="chunkSize" type="number" value="400"></label>
         <label>overlap<input id="overlap" type="number" value="60"></label>
         <label>表格每块行数<input id="tableRows" type="number" value="10"></label>
       </div>
-      <p></p>
       <textarea id="manualMd" rows="9" placeholder="# 标题&#10;&#10;## 小节&#10;&#10;正文……"></textarea>
-      <div class="btnrow">
-        <button class="btn" id="previewBtn" type="button">切块预览</button>
+      <div class="btnrow" style="margin-top:10px">
+        <button class="btn primary" id="previewBtn" type="button">切块预览(不写库)</button>
         <button class="btn" id="ingestBtn" type="button">录入入库</button>
-        <label class="muted"><input type="checkbox" id="doVectorize" checked> 入库后顺手向量化</label>
-        <button class="btn" id="sampleBtn" type="button">填一段示例</button>
+        <label class="check"><input type="checkbox" id="doVectorize" checked> 入库后顺手向量化</label>
       </div>
       <div class="toast" id="ingestMsg"></div>
+    </div>
+    <div class="panel-body">
+      <div class="features" id="previewChips"></div>
+      <div class="tablerow" id="previewOut"><span class="empty-state">尚未预览。</span></div>
+    </div>
+  </section>
+
+  <div class="grid2">
+    <section class="panel">
+      <div class="panel-head">
+        <div class="num">2</div>
+        <h2>建库材料</h2>
+        <span class="hint mono">data/kb/*.md</span>
+      </div>
+      <div class="panel-body">
+        <div class="list" id="materials"><span class="muted">读取中…</span></div>
+        <div id="materialJobs"></div>
+      </div>
     </section>
 
-    <section class="card">
-      <h2>② 建库材料 <span class="hint">data/kb/*.md</span></h2>
-      <div id="materials"><span class="muted">读取中…</span></div>
-      <div id="materialJobs"></div>
+    <section class="panel">
+      <div class="panel-head">
+        <div class="num">3</div>
+        <h2>对话挖知识</h2>
+        <span class="hint">分批抽取 → 暂存表 → 整体去重</span>
+      </div>
+      <div class="panel-body">
+        <div class="features" id="stagingStats"><span class="muted">读取中…</span></div>
+        <div class="btnrow"><button class="btn" id="stagingBtn" type="button">看暂存表逐条</button></div>
+        <div class="tablerow" id="stagingList"></div>
+        <div id="mineJobs"></div>
+      </div>
     </section>
   </div>
 
-  <section class="card">
-    <h2>预览结果 <span class="hint">dry-run 不写库;标出重复 / 关键条款 / 表格块</span></h2>
-    <div id="previewCounts" class="muted"></div>
-    <div id="previewOut" class="muted">尚未预览。</div>
-  </section>
-
-  <div class="grid">
-    <section class="card">
-      <h2>③ 对话挖知识</h2>
-      <div id="stagingStats" class="muted">读取中…</div>
-      <div class="btnrow"><button class="btn" id="stagingBtn" type="button">看暂存表逐条</button></div>
-      <div id="stagingList"></div>
-      <div id="mineJobs"></div>
-    </section>
-
-    <section class="card">
-      <h2>④ 向量化与双写</h2>
-      <div id="dualStats" class="muted">读取中…</div>
-      <div class="btnrow">
-        <button class="btn" id="vectorizeBtn" type="button">向量化待补块</button>
+  <section class="panel">
+    <div class="panel-head">
+      <div class="num">4</div>
+      <h2>向量化与双写</h2>
+      <span class="hint">MySQL 权威源 → 嵌入 → Milvus 读模型</span>
+      <div class="actions">
+        <button class="btn primary" id="vectorizeBtn" type="button">向量化待补块</button>
         <button class="btn heavy" id="resetBtn" type="button">清库重建</button>
       </div>
-      <p class="muted">Milvus Lite 单进程独占:向量化与清库由本服务进程内执行;终端 make kb-vectorize / kb-reset 需先停服务。</p>
-    </section>
-  </div>
-
-  <section class="card">
-    <h2>⑤ 检索自测 <span class="hint">本章只跑 dense 向量单路</span></h2>
-    <div class="row">
-      <label>问题<input id="searchQuery" type="text" placeholder="邮费是多少"></label>
-      <label>Top-K<input id="searchTopK" type="number" value="3"></label>
     </div>
-    <div class="btnrow">
-      <button class="btn" id="searchBtn" type="button">检索</button>
-      <button class="btn" data-preset="邮费是多少" type="button">预设:邮费是多少</button>
-      <button class="btn" data-preset="多久能发货" type="button">预设:多久能发货</button>
-      <button class="btn" data-preset="怎么开发票" type="button">预设:怎么开发票</button>
+    <div class="panel-body">
+      <div class="flow" id="dualFlow"></div>
+      <p class="muted">Milvus Lite 单进程独占:向量化与清库由本服务进程内执行;终端 <span class="mono">make kb-vectorize / kb-reset</span> 需先停服务。</p>
     </div>
-    <div id="searchOut"></div>
   </section>
 
-  <section class="card">
-    <h2>⑥ 最近入库</h2>
-    <div id="recent"><span class="muted">读取中…</span></div>
+  <section class="panel">
+    <div class="panel-head">
+      <div class="num">5</div>
+      <h2>检索自测</h2>
+      <span class="chip c-off">dense 向量单路</span>
+      <span class="hint">输一句话,当场看召回哪几块、各自多少分</span>
+    </div>
+    <div class="panel-body">
+      <div class="row">
+        <label style="flex:2 1 300px">问题<input id="searchQuery" type="text" placeholder="邮费是多少"></label>
+        <label>Top-K<input id="searchTopK" type="number" value="3"></label>
+      </div>
+      <div class="btnrow" style="margin-bottom:12px">
+        <button class="btn primary" id="searchBtn" type="button">检索</button>
+        <button class="btn" data-preset="邮费是多少" type="button">预设:邮费是多少</button>
+        <button class="btn" data-preset="多久能发货" type="button">预设:多久能发货</button>
+        <button class="btn" data-preset="怎么开发票" type="button">预设:怎么开发票</button>
+      </div>
+      <div id="searchOut"></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <div class="num">6</div>
+      <h2>最近入库</h2>
+      <span class="hint">按 id 倒序</span>
+    </div>
+    <div class="panel-body">
+      <div class="tablerow" id="recent"><span class="muted">读取中…</span></div>
+    </div>
   </section>
 </main>
 
@@ -102,18 +151,14 @@
   const { el, getJSON, pill, fmt } = AC;
   const jobTailCache = {};
   const jobSpecs = {};
+  let lastPreviewSource = '手工录入';
 
-  function statBox(label, value) {
-    return el('div', { class: 'stat' }, [
-      el('b', { text: fmt(value) }),
-      el('span', { text: label }),
-    ]);
-  }
+  /* ---------------- 概览 ---------------- */
 
   async function loadOverview() {
     try {
       const o = await getJSON('/api/kb/overview');
-      renderGate(o);
+      renderStats(o);
       renderMaterials(o.materials);
       renderStaging(o.staging);
       renderDual(o);
@@ -125,46 +170,66 @@
         if (pre) pre.textContent = jobTailCache[j.name] || '';
       });
     } catch (e) {
-      document.getElementById('gate').innerHTML = '';
-      document.getElementById('gate').appendChild(pill('读数失败:' + e.message, 'bad'));
+      const host = document.getElementById('stats');
+      host.innerHTML = '';
+      host.appendChild(tile('—', '读取失败:' + e.message, 'bad'));
     }
   }
 
-  function renderGate(o) {
+  function tile(value, label, kind) {
+    return el('div', { class: 'tile' + (kind ? ' ' + kind : '') }, [
+      el('b', { text: fmt(value) }),
+      el('span', { text: label }),
+    ]);
+  }
+
+  function renderStats(o) {
+    const host = document.getElementById('stats');
+    host.innerHTML = '';
     const k = o.knowledge;
-    const gate = document.getElementById('gate');
-    gate.innerHTML = '';
     if (!k) {
-      gate.appendChild(pill('MySQL 读不到', 'bad'));
+      host.appendChild(tile('—', '知识块(MySQL) · 读不到', 'bad'));
+      host.appendChild(tile('—', '待向量化', ''));
+      host.appendChild(tile(fmt(o.milvus_count), 'Milvus 条数', ''));
+      host.appendChild(tile('—', '关键条款', ''));
     } else {
-      gate.appendChild(statBox('知识块数', k.total));
-      gate.appendChild(statBox('待向量化', k.pending));
-      gate.appendChild(statBox('Milvus 条数', o.milvus_count));
-      gate.appendChild(statBox('关键条款', k.key_clause));
+      host.appendChild(tile(k.total, '知识块(MySQL)', k.total ? '' : ''));
+      host.appendChild(tile(k.pending, '待向量化', k.pending ? 'hot' : ''));
+      host.appendChild(tile(o.milvus_count, 'Milvus 条数', ''));
+      host.appendChild(tile(k.key_clause, '关键条款', ''));
     }
     let text, kind;
-    if (o.consistent === null) { text = '双写:读不到'; kind = 'bad'; }
-    else if (o.consistent) { text = '双写:一致'; kind = 'ok'; }
-    else { text = '双写:对不上'; kind = 'warn'; }
-    gate.appendChild(pill(text, kind));
+    if (o.consistent === null) { text = '读不到'; kind = 'bad'; }
+    else if (o.consistent) { text = '一致'; kind = 'ok'; }
+    else { text = '对不上'; kind = 'warn'; }
+    const statusTile = el('div', { class: 'tile ' + (kind === 'ok' ? 'ok' : (kind === 'bad' ? 'bad' : '')) }, [
+      el('b', {}, [pill(text, kind)]),
+      el('span', { text: '双写' }),
+    ]);
+    host.appendChild(statusTile);
   }
+
+  /* ---------------- 材料 ---------------- */
 
   function renderMaterials(materials) {
     const host = document.getElementById('materials');
     host.innerHTML = '';
     (materials || []).forEach((m) => {
-      const row = el('div', { class: 'btnrow' }, [
-        el('span', { text: m.filename + ' [' + m.content_type + ']' }),
-        m.error
-          ? pill('读不到', 'bad')
-          : el('span', { class: 'muted', text: m.chunks + ' 块 / 关键条款 ' + m.key_clauses + ' / 表格块 ' + m.table_blocks }),
-      ]);
-      if (!m.error) {
-        const btn = el('button', { class: 'btn', text: '看切块' });
-        btn.onclick = () => preview({ filename: m.filename });
-        row.appendChild(btn);
+      if (m.error) {
+        host.appendChild(el('div', { class: 'item' }, [
+          el('span', { class: 'name', text: m.filename }),
+          pill('读不到', 'bad'),
+        ]));
+        return;
       }
-      host.appendChild(row);
+      const btn = el('button', { class: 'btn', text: '看切块' });
+      btn.onclick = () => preview({ filename: m.filename }, m.filename);
+      host.appendChild(el('div', { class: 'item' }, [
+        el('span', { class: 'name', text: m.filename }),
+        el('span', { class: 'chip c-source', text: m.content_type }),
+        el('span', { class: 'meta grow', text: m.chunks + ' 块 · 关键条款 ' + m.key_clauses + ' · 表格块 ' + m.table_blocks }),
+        btn,
+      ]));
     });
     const jobsHost = document.getElementById('materialJobs');
     if (!jobsHost.dataset.ready) {
@@ -173,16 +238,7 @@
     }
   }
 
-  function renderDual(o) {
-    const k = o.knowledge;
-    const host = document.getElementById('dualStats');
-    host.innerHTML = '';
-    if (!k) {
-      host.appendChild(pill('MySQL 读不到', 'bad'));
-    } else {
-      host.appendChild(el('span', { class: 'muted', text: 'pending ' + k.pending + ' / done ' + k.done + ' / Milvus ' + fmt(o.milvus_count) }));
-    }
-  }
+  /* ---------------- 挖知识 ---------------- */
 
   function renderStaging(staging) {
     const host = document.getElementById('stagingStats');
@@ -191,7 +247,10 @@
       host.appendChild(pill('MySQL 读不到', 'bad'));
     } else {
       const c = staging.counts;
-      host.appendChild(el('span', { class: 'muted', text: '抽出 ' + c.extracted + ' / 保留 ' + c.kept + ' / 丢弃 ' + c.discarded + ' · 批次 ' + staging.batches }));
+      host.appendChild(el('span', { class: 'chip', text: '抽出 ' + c.extracted }));
+      host.appendChild(el('span', { class: 'chip c-ok', text: '保留 ' + c.kept }));
+      host.appendChild(el('span', { class: 'chip c-dup', text: '丢弃 ' + c.discarded }));
+      host.appendChild(el('span', { class: 'chip c-off', text: '批次 ' + staging.batches }));
     }
     const jobsHost = document.getElementById('mineJobs');
     if (!jobsHost.dataset.ready) {
@@ -200,30 +259,66 @@
     }
   }
 
+  /* ---------------- 双写流程 ---------------- */
+
+  function renderDual(o) {
+    const host = document.getElementById('dualFlow');
+    host.innerHTML = '';
+    const k = o.knowledge;
+    if (!k) {
+      host.appendChild(el('div', { class: 'node pending' }, [
+        el('b', { text: '—' }), el('span', { text: 'MySQL 读不到' }),
+      ]));
+    } else {
+      host.appendChild(el('div', { class: 'node pending' }, [
+        el('b', { text: k.pending }), el('span', { text: '待向量化(pending)' }),
+      ]));
+      host.appendChild(el('div', { class: 'arrow', text: '→' }));
+      host.appendChild(el('div', { class: 'node done' }, [
+        el('b', { text: k.done }), el('span', { text: '已向量化(done)' }),
+      ]));
+      host.appendChild(el('div', { class: 'arrow', text: '→' }));
+      host.appendChild(el('div', { class: 'node milvus' }, [
+        el('b', { text: fmt(o.milvus_count) }), el('span', { text: 'Milvus 集合 knowledge' }),
+      ]));
+    }
+    let text, kind;
+    if (o.consistent === null) { text = '双写:读不到'; kind = 'bad'; }
+    else if (o.consistent) { text = '双写:一致'; kind = 'ok'; }
+    else { text = '双写:对不上'; kind = 'warn'; }
+    host.appendChild(el('div', { class: 'node' }, [
+      el('b', {}, [pill(text, kind)]),
+      el('span', { text: '知识块总数 = Milvus 条数' }),
+    ]));
+  }
+
+  /* ---------------- 最近入库 ---------------- */
+
   function renderRecent(recent) {
     const host = document.getElementById('recent');
     host.innerHTML = '';
     if (!recent || !recent.length) {
-      host.appendChild(el('span', { class: 'muted', text: '暂无入库记录。' }));
+      host.appendChild(el('span', { class: 'empty-state', text: '暂无入库记录。' }));
       return;
     }
     const table = el('table', { class: 'tbl' });
     table.appendChild(el('thead', {}, [
-      el('tr', {}, ['id', '问法', '类型', '状态'].map((h) => el('th', { text: h }))),
+      el('tr', {}, ['id', '问法', '类型', '状态'].map((h, i) => el('th', { class: i === 0 ? 'num' : '', text: h }))),
     ]));
     const tbody = el('tbody');
     recent.forEach((r) => {
-      const tr = el('tr', {}, [
-        el('td', { text: r.id }),
+      tbody.appendChild(el('tr', {}, [
+        el('td', { class: 'num', text: r.id }),
         el('td', { text: r.questions }),
-        el('td', { text: r.content_type || '—' }),
+        el('td', {}, [el('span', { class: 'chip c-source', text: r.content_type || '—' })]),
         el('td', {}, [pill(r.vectorize_status, r.vectorize_status === 'done' ? 'ok' : 'warn')]),
-      ]);
-      tbody.appendChild(tr);
+      ]));
     });
     table.appendChild(tbody);
     host.appendChild(table);
   }
+
+  /* ---------------- 预览 ---------------- */
 
   function chunkParams() {
     return {
@@ -233,47 +328,100 @@
     };
   }
 
-  function renderPreview(data) {
-    const counts = document.getElementById('previewCounts');
-    counts.textContent = data.counts.chunks + ' 块 · 关键条款 ' + data.counts.key_clauses +
-      ' · 表格块 ' + data.counts.table_blocks + ' · 重复 ' + data.counts.duplicates;
-    const out = document.getElementById('previewOut');
-    out.innerHTML = '';
-    if (!data.chunks.length) {
-      out.appendChild(el('span', { class: 'muted', text: '没有切出块(正文为空?)' }));
-      return;
-    }
-    data.chunks.forEach((c) => {
-      const meta = el('div', { class: 'meta' }, [
-        'section: ' + (c.section_path || '—') + ' · ' + c.content_type + ' · ' + c.answer.length + ' 字',
-      ]);
-      if (c.is_key_clause) meta.appendChild(pill('关键条款', 'warn'));
-      if (c.is_table) meta.appendChild(pill('表格块', 'ok'));
-      if (c.duplicate) meta.appendChild(pill('重复', 'bad'));
-      out.appendChild(el('div', { class: 'chunk' }, [
-        el('div', { class: 'q', text: c.questions }),
-        meta,
-        el('div', { class: 'body', text: c.answer }),
-      ]));
+  function groupBySection(chunks) {
+    const groups = new Map();
+    chunks.forEach((c) => {
+      const key = c.section_path || '—';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(c);
     });
+    return groups;
   }
 
-  async function preview(payload) {
+  function renderPreview(data, source) {
+    const chunks = data.chunks || [];
+    const sections = new Set(chunks.map((c) => c.section_path || '—')).size;
+    const groups = [...groupBySection(chunks).values()];
+    const tableSplit = groups.some((g) => g.length > 1 && g.every((c) => c.is_table));
+    const overlapOn = (Number(document.getElementById('overlap').value) || 0) > 0;
+    const overlapHit = overlapOn && groups.some((g) => g.length > 1 && g.some((c) => !c.is_table));
+
+    const chips = document.getElementById('previewChips');
+    chips.innerHTML = '';
+    chips.appendChild(el('span', { class: 'chip c-source', text: '来源 ' + source }));
+    chips.appendChild(el('span', { class: 'chip', text: '共 ' + chunks.length + ' 块 / ' + sections + ' 节' }));
+    chips.appendChild(el('span', {
+      class: 'chip ' + (tableSplit ? 'c-ok' : 'c-off'),
+      text: tableSplit ? '表格按行拆 已触发' : '表格按行拆 未触发',
+    }));
+    chips.appendChild(el('span', {
+      class: 'chip ' + (overlapHit ? 'c-ok' : 'c-off'),
+      text: overlapHit ? '句末重叠 已触发' : '句末重叠 未触发',
+    }));
+    chips.appendChild(el('span', { class: 'chip c-key', text: '关键条款 ' + data.counts.key_clauses + ' 块' }));
+    const dupKind = data.counts.duplicates ? 'c-dup' : 'c-ok';
+    chips.appendChild(el('span', {
+      class: 'chip ' + dupKind,
+      text: data.counts.duplicates ? '重复 ' + data.counts.duplicates + ' 块' : '无重复,可入库',
+    }));
+
+    const host = document.getElementById('previewOut');
+    host.innerHTML = '';
+    if (!chunks.length) {
+      host.appendChild(el('span', { class: 'empty-state', text: '没有切出块(正文为空?)' }));
+      return;
+    }
+    const table = el('table', { class: 'tbl' });
+    table.appendChild(el('thead', {}, [
+      el('tr', {}, [
+        el('th', { class: 'num', text: '#' }),
+        el('th', { text: '节(section_path)' }),
+        el('th', { text: '问法 questions' }),
+        el('th', { text: '正文 answer' }),
+        el('th', { class: 'num', text: '字数' }),
+        el('th', { text: '标记' }),
+      ]),
+    ]));
+    const tbody = el('tbody');
+    chunks.forEach((c, i) => {
+      const marks = el('td', {});
+      if (c.is_key_clause) marks.appendChild(el('span', { class: 'badge key', text: '关键条款' }));
+      if (c.is_table) marks.appendChild(el('span', { class: 'badge table', text: '表格块' }));
+      if (c.duplicate) marks.appendChild(el('span', { class: 'badge dup', text: '重复' }));
+      const ans = el('td', { class: 'ans', text: c.answer.length > 120 ? c.answer.slice(0, 120) + '…' : c.answer });
+      ans.title = c.answer;
+      tbody.appendChild(el('tr', {}, [
+        el('td', { class: 'num', text: i + 1 }),
+        el('td', { class: 'mono', text: c.section_path || '—' }),
+        el('td', { text: c.questions }),
+        ans,
+        el('td', { class: 'num', text: c.answer.length }),
+        marks,
+      ]));
+    });
+    table.appendChild(tbody);
+    host.appendChild(table);
+  }
+
+  async function preview(payload, source) {
+    lastPreviewSource = source || '手工录入';
     const body = Object.assign({}, chunkParams(), payload);
     try {
       const data = await getJSON('/api/kb/preview', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
-      renderPreview(data);
+      renderPreview(data, lastPreviewSource);
     } catch (e) {
       document.getElementById('previewOut').textContent = '预览失败:' + e.message;
     }
   }
 
+  /* ---------------- 录入 / 向量化 / 清库 ---------------- */
+
   document.getElementById('previewBtn').onclick = () => preview({
     markdown: document.getElementById('manualMd').value,
     content_type: document.getElementById('ctype').value,
-  });
+  }, '手工录入');
 
   document.getElementById('ingestBtn').onclick = async () => {
     const msg = document.getElementById('ingestMsg');
@@ -298,47 +446,58 @@
   };
 
   document.getElementById('sampleBtn').onclick = () => {
-    document.getElementById('manualMd').value = '# 售后补充政策\n\n## 运费补充说明\n\n单笔订单满 99 元包邮,未满收取 10 元运费,偏远地区另计。\n\n## 客服工作时间\n\n每日 9:00-21:00 在线,其余时间留言次日回复。';
+    document.getElementById('manualMd').value = '# 售后补充政策\n\n## 运费补充说明【关键】\n\n单笔订单满 99 元包邮,未满收取 10 元运费,偏远地区另计。\n\n## 客服工作时间\n\n每日 9:00-21:00 在线,其余时间留言次日回复。';
+  };
+
+  document.getElementById('clearBtn').onclick = () => {
+    document.getElementById('manualMd').value = '';
+    document.getElementById('previewChips').innerHTML = '';
+    document.getElementById('previewOut').innerHTML = '<span class="empty-state">尚未预览。</span>';
+    document.getElementById('ingestMsg').textContent = '';
+  };
+
+  document.getElementById('refreshBtn').onclick = loadOverview;
+
+  document.getElementById('vectorizeBtn').onclick = async () => {
+    const host = document.getElementById('dualFlow');
+    host.innerHTML = '<span class="muted">向量化中…</span>';
+    try {
+      const data = await getJSON('/api/kb/vectorize', { method: 'POST' });
+      host.innerHTML = '<span class="chip c-ok">本次向量化 ' + data.vectorized + ' 块</span>';
+      loadOverview();
+    } catch (e) {
+      host.innerHTML = '';
+      host.appendChild(pill('向量化失败:' + e.message, 'bad'));
+    }
   };
 
   document.getElementById('resetBtn').onclick = async () => {
     if (!confirm('清空知识库(MySQL + Milvus 集合),确定?')) return;
-    const host = document.getElementById('dualStats');
-    host.textContent = '清库中…';
     try {
       await getJSON('/api/kb/reset', { method: 'POST' });
-      host.textContent = '已清空 knowledge_chunks 与 Milvus 集合。';
       loadOverview();
     } catch (e) {
-      host.textContent = '清库失败:' + e.message;
+      alert('清库失败:' + e.message);
     }
   };
 
-  document.getElementById('vectorizeBtn').onclick = async () => {
-    const host = document.getElementById('dualStats');
-    host.textContent = '向量化中…';
-    try {
-      const data = await getJSON('/api/kb/vectorize', { method: 'POST' });
-      host.textContent = '本次向量化 ' + data.vectorized + ' 块;Milvus 现有 ' + data.milvus_count + ' 条。';
-      loadOverview();
-    } catch (e) {
-      host.textContent = '向量化失败:' + e.message;
-    }
-  };
+  /* ---------------- 暂存表 ---------------- */
 
   document.getElementById('stagingBtn').onclick = async () => {
     try {
       const data = await getJSON('/api/kb/staging');
       const host = document.getElementById('stagingList');
       host.innerHTML = '';
-      const table = el('table', { class: 'tbl' }, [
-        el('thead', {}, [el('tr', {}, ['id', '批次', '问法', '答案', '状态'].map((h) => el('th', { text: h })))]),
-      ]);
+      const table = el('table', { class: 'tbl' });
+      table.appendChild(el('thead', {}, [
+        el('tr', {}, ['id', '批次', '来源', '问法', '答案', '状态'].map((h, i) => el('th', { class: i === 0 ? 'num' : '', text: h }))),
+      ]));
       const tbody = el('tbody');
       (data.items || []).forEach((s) => {
         tbody.appendChild(el('tr', {}, [
-          el('td', { text: s.id }),
-          el('td', { text: s.batch_no }),
+          el('td', { class: 'num', text: s.id }),
+          el('td', { class: 'mono', text: s.batch_no }),
+          el('td', { class: 'mono', text: s.source_ref || '—' }),
           el('td', { text: s.question }),
           el('td', { text: s.answer }),
           el('td', {}, [pill(s.status, s.status === 'discarded' ? 'bad' : (s.status === 'kept' ? 'ok' : 'warn'))]),
@@ -350,6 +509,8 @@
       document.getElementById('stagingList').textContent = '读取失败:' + e.message;
     }
   };
+
+  /* ---------------- 检索 ---------------- */
 
   async function runSearch() {
     const out = document.getElementById('searchOut');
@@ -364,24 +525,24 @@
       });
       out.innerHTML = '';
       if (!data.hits.length) {
-        out.appendChild(el('span', { class: 'muted', text: '未命中(低于阈值)。' }));
+        out.appendChild(el('span', { class: 'empty-state', text: '未命中(低于阈值)。' }));
         return;
       }
-      const table = el('table', { class: 'tbl' }, [
-        el('thead', {}, [el('tr', {}, ['#', 'id', '分数', '问法', '答案'].map((h) => el('th', { text: h })))]),
-      ]);
-      const tbody = el('tbody');
       data.hits.forEach((h, i) => {
-        tbody.appendChild(el('tr', {}, [
-          el('td', { text: i + 1 }),
-          el('td', { text: h.id }),
-          el('td', { text: h.score.toFixed(4) }),
-          el('td', { text: h.question }),
-          el('td', { text: h.answer }),
+        const bar = el('div', { class: 'scorebar' }, [
+          el('i', { style: 'width:' + Math.max(2, Math.min(100, h.score * 100)) + '%' }),
+        ]);
+        out.appendChild(el('div', { class: 'hit' }, [
+          el('div', { class: 'top' }, [
+            el('span', { class: 'rank', text: '#' + (i + 1) }),
+            el('span', { class: 'q', text: h.question }),
+            el('span', { class: 'chip c-off', text: 'id ' + h.id }),
+            el('span', { class: 'chip c-source', text: 'score ' + h.score.toFixed(4) }),
+          ]),
+          bar,
+          el('div', { class: 'ans', text: h.answer }),
         ]));
       });
-      table.appendChild(tbody);
-      out.appendChild(table);
     } catch (e) {
       out.textContent = '检索失败:' + e.message;
     }
@@ -395,17 +556,21 @@
     };
   });
 
+  /* ---------------- 作业 ---------------- */
+
   function jobPanel(names) {
     const wrap = el('div');
     names.forEach((name) => {
-      const statusEl = el('span', { class: 'muted', text: '' });
+      const statusEl = el('span', { class: 'status', text: '' });
       const heavy = !!(jobSpecs[name] && jobSpecs[name].heavy);
       const btn = el('button', { class: 'btn' + (heavy ? ' heavy' : ''), text: '重跑 ' + name });
       const logEl = el('pre', { class: 'log', text: jobTailCache[name] || '' });
       logEl.dataset.job = name;
       btn.onclick = () => startJob(name, btn, statusEl, logEl);
-      wrap.appendChild(el('div', { class: 'btnrow' }, [btn, statusEl]));
-      wrap.appendChild(logEl);
+      wrap.appendChild(el('div', { class: 'job' }, [
+        el('div', { class: 'btnrow' }, [btn, statusEl]),
+        logEl,
+      ]));
     });
     return wrap;
   }
