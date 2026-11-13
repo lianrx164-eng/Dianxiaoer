@@ -3,3 +3,7 @@ __pycache__/
 *.pyc
 .env
 .pytest_cache/
+# Milvus Lite 本地库文件
+data/*.db*
+# 临时探测脚本
+.scratch/

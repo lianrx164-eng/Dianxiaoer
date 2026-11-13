@@ -15,5 +15,13 @@ class Settings(BaseSettings):
     database_url: str = "mysql+asyncmy://root:root@localhost:3306/mewhelp_ch02?charset=utf8mb4"
     test_database_url: str = "mysql+asyncmy://root:root@localhost:3306/mewhelp_test?charset=utf8mb4"
 
+    # 嵌入:阿里云百炼系列,OpenAI 兼容网关;key 同聊天一样不给默认值
+    embed_base_url: str = "https://maas.qianwenaiapi.com/compatible-mode/v1"
+    embed_api_key: str
+    embed_model: str = "text-embedding-v4"
+    milvus_uri: str = "data/milvus_knowledge.db"
+    retrieval_top_k: int = 3
+    retrieval_min_score: float = 0.4
+
 
 settings = Settings()

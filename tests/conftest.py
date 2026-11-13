@@ -6,6 +6,7 @@ import pathlib
 os.environ.setdefault("CHAT_MODEL", "test-model")
 os.environ.setdefault("CHAT_BASE_URL", "http://localhost:9/v1")
 os.environ.setdefault("CHAT_API_KEY", "test-key")
+os.environ.setdefault("EMBED_API_KEY", "test-key")
 
 import pytest_asyncio
 from sqlalchemy import text
