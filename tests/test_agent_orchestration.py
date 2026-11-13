@@ -4,32 +4,7 @@ from sqlalchemy import func, select
 from app.core import agent
 from app.db import repository as repo
 from app.db.models import Conversation, Message
-
-
-class FakeModel:
-    """turn1 返回 scripted[0](可带 tool_calls);非流式收敛返回 scripted[1];
-    流式收敛按 stream_tokens 逐个 yield AIMessageChunk。
-    bind_calls 记录 bind_tools 次数(收敛不 bind → 应恒为 1)。"""
-    def __init__(self, scripted, stream_tokens=None):
-        self._scripted = list(scripted)
-        self._stream_tokens = list(stream_tokens or [])
-        self.bind_calls = 0
-        self.invoke_messages = []
-        self.astream_messages = []
-
-    def bind_tools(self, tools):
-        self.bind_calls += 1
-        return self
-
-    async def ainvoke(self, messages):
-        self.invoke_messages.append(list(messages))
-        return self._scripted.pop(0)
-
-    async def astream(self, messages):
-        self.astream_messages.append(list(messages))
-        for t in self._stream_tokens:
-            from langchain_core.messages import AIMessageChunk
-            yield AIMessageChunk(content=t)
+from fake_model import FakeModel
 
 
 async def test_no_tool_calls_returns_direct_answer(db_session_factory, db_clean):

@@ -26,7 +26,13 @@ turns = [
 for i, msg in enumerate(turns, 1):
     print(f"=== 第{i}轮: {msg} ===")
     body = {"user_id": user_id, "message": msg, "conversation_id": conversation_id}
-    with httpx.stream("POST", f"{base}/api/chat", json=body, timeout=120) as r:
+    with httpx.stream(
+        "POST",
+        f"{base}/api/chat",
+        json=body,
+        timeout=120,
+        trust_env=False,   # 只连本机,绕开系统代理
+    ) as r:
         r.raise_for_status()
         event = "message"
         tools = []

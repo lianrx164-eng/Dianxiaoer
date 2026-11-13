@@ -1,29 +1,8 @@
-from langchain_core.messages import AIMessage, AIMessageChunk
+from langchain_core.messages import AIMessage
 
 from app.core import agent
 from app.db import repository as repo
-
-
-class FakeModel:
-    def __init__(self, scripted, stream_tokens=None):
-        self._scripted = list(scripted)
-        self._stream_tokens = list(stream_tokens or [])
-        self.bind_calls = 0
-        self.invoke_messages = []
-        self.astream_messages = []
-
-    def bind_tools(self, tools):
-        self.bind_calls += 1
-        return self
-
-    async def ainvoke(self, messages):
-        self.invoke_messages.append(list(messages))
-        return self._scripted.pop(0)
-
-    async def astream(self, messages):
-        self.astream_messages.append(list(messages))
-        for t in self._stream_tokens:
-            yield AIMessageChunk(content=t)
+from fake_model import FakeModel
 
 
 async def _collect(agen):
@@ -87,3 +66,25 @@ async def test_stream_convergence_carries_single_round_guard(db_session_factory,
     converged = model.astream_messages[0]
     assert "不要再" in converged[-1].content
     assert converged[-1].type == "system"
+
+
+async def test_tool_frame_emitted_before_tool_executes(db_session_factory, db_clean, monkeypatch):
+    first = AIMessage(content="", tool_calls=[
+        {"name": "query_logistics", "args": {"order_id": "1001"}, "id": "c1"}])
+    model = FakeModel([first], stream_tokens=["完成"])
+    executed = {"done": False}
+    real_exec = agent.execute_tool_call
+
+    async def spy(tc, cid):
+        executed["done"] = True
+        return await real_exec(tc, cid)
+
+    monkeypatch.setattr(agent, "execute_tool_call", spy)
+
+    agen = agent.stream_agent_turn("u1", "查物流", None, model=model)
+    first_ev = await agen.__anext__()
+    assert first_ev == {"type": "tool", "name": "query_logistics"}
+    assert executed["done"] is False          # 状态帧必须先于工具执行
+    async for _ in agen:
+        pass
+    assert executed["done"] is True

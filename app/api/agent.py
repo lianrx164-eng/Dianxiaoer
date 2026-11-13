@@ -1,8 +1,8 @@
 import logging
 
 from fastapi import APIRouter, HTTPException
-from sqlalchemy.exc import SQLAlchemyError
 
+from app.api import errors
 from app.core import agent
 from app.schemas.agent import AgentRequest, AgentResponse, ToolCallView, ToolResultView
 
@@ -14,14 +14,12 @@ router = APIRouter()
 async def run_agent(req: AgentRequest) -> AgentResponse:
     try:
         result = await agent.run_agent_turn(req.user_id, req.message, req.conversation_id)
-    except agent.ConversationNotFound:
-        raise HTTPException(status_code=404, detail="会话不存在")
-    except SQLAlchemyError:
-        logger.exception("数据库错误 user_id=%s", req.user_id)
-        raise HTTPException(status_code=503, detail="数据库暂时不可用,请稍后重试")
-    except Exception:
-        logger.exception("agent 编排失败 user_id=%s", req.user_id)
-        raise HTTPException(status_code=502, detail="上游模型暂时不可用,请稍后重试")
+    except Exception as exc:  # noqa: BLE001 - 统一映射为 HTTP 错误
+        kind = errors.classify(exc)
+        if kind != errors.NOT_FOUND:
+            logger.exception("agent 编排失败 kind=%s user_id=%s", kind, req.user_id)
+        raise HTTPException(status_code=errors.HTTP_STATUS[kind],
+                            detail=errors.ERROR_MESSAGES[kind])
 
     return AgentResponse(
         conversation_id=result.conversation_id,

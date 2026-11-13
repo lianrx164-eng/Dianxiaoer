@@ -57,7 +57,7 @@ def _build_history(rows: list[Message]) -> list[BaseMessage]:
 
 async def _prepare_turn(user_id, message, conversation_id, model):
     """共享编排前半:会话身份 → 组装历史 → turn1 bind_tools 定工具 → 落库(user →
-    assistant)→ 有工具则并行执行落 tool。返回 (cid, messages, ai, runs)。
+    assistant)。返回 (cid, messages, ai);工具执行由 _execute_tools 单独进行。
 
     先拿到 turn1 再落库:上游失败时不留下半截 user 行/孤儿会话,重试不产生重复行。"""
     if conversation_id is not None and await repository.get_conversation(conversation_id) is None:
@@ -74,27 +74,30 @@ async def _prepare_turn(user_id, message, conversation_id, model):
         conversation_id, "assistant",
         content=_text(ai) or None, tool_calls=ai.tool_calls or None,
     )
+    return conversation_id, messages, ai
 
-    runs: list[ToolRun] = []
-    if ai.tool_calls:
-        runs = await asyncio.gather(
-            *(execute_tool_call(tc, conversation_id) for tc in ai.tool_calls)
+
+async def _execute_tools(conversation_id: int, tool_calls: list[dict]) -> list[ToolRun]:
+    """并行执行 turn1 申请的工具,并把结果逐条落库。"""
+    runs: list[ToolRun] = await asyncio.gather(
+        *(execute_tool_call(tc, conversation_id) for tc in tool_calls)
+    )
+    for r in runs:
+        await repository.append_message(
+            conversation_id, "tool",
+            content=r.tool_message.content, tool_call_id=r.tool_call_id,
         )
-        for r in runs:
-            await repository.append_message(
-                conversation_id, "tool",
-                content=r.tool_message.content, tool_call_id=r.tool_call_id,
-            )
-    return conversation_id, messages, ai, runs
+    return list(runs)
 
 
 async def run_agent_turn(user_id, message, conversation_id, model=None) -> AgentResult:
     """非流式出口:一次性返回工具轨迹 + 最终回答(供 /api/agent、eval、单测)。"""
     model = model or get_chat_model()
-    conversation_id, messages, ai, runs = await _prepare_turn(
+    conversation_id, messages, ai = await _prepare_turn(
         user_id, message, conversation_id, model)
     if not ai.tool_calls:
         return AgentResult(conversation_id, _text(ai), [], [])
+    runs = await _execute_tools(conversation_id, ai.tool_calls)
     final: AIMessage = await model.ainvoke(         # 收敛:不 bind_tools
         [*messages, ai, *(r.tool_message for r in runs), CONVERGENCE_GUARD])
     await repository.append_message(conversation_id, "assistant", content=_text(final))
@@ -106,7 +109,7 @@ async def stream_agent_turn(
 ) -> AsyncIterator[dict]:
     """流式出口:产出事件 dict 供 /api/chat 转 SSE。收敛用 astream 逐 token、不 bind。"""
     model = model or get_chat_model(streaming=True)
-    conversation_id, messages, ai, runs = await _prepare_turn(
+    conversation_id, messages, ai = await _prepare_turn(
         user_id, message, conversation_id, model)
 
     if not ai.tool_calls:
@@ -115,8 +118,11 @@ async def stream_agent_turn(
         yield {"type": "done", "conversation_id": conversation_id}
         return
 
+    # 状态帧先于工具执行发出,前端徽章在工具跑起来之前就能亮
     for tc in ai.tool_calls:
         yield {"type": "tool", "name": tc.get("name") or ""}
+
+    runs = await _execute_tools(conversation_id, ai.tool_calls)
 
     chunks: list[str] = []
     async for chunk in model.astream(

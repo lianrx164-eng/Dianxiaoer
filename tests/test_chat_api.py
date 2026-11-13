@@ -2,31 +2,14 @@ import json
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from langchain_core.messages import AIMessage, AIMessageChunk
+from langchain_core.messages import AIMessage
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.api import chat as chat_api
+from app.core import agent
 from app.db import repository as repo
 from app.main import app
-
-
-class FakeModel:
-    """bind_tools 返回自身;ainvoke 按脚本返回;astream 逐 token 吐收敛文本。"""
-
-    def __init__(self, scripted, stream_tokens=None):
-        self._scripted = list(scripted)
-        self._stream_tokens = list(stream_tokens or [])
-        self.bind_calls = 0
-
-    def bind_tools(self, tools):
-        self.bind_calls += 1
-        return self
-
-    async def ainvoke(self, messages):
-        return self._scripted.pop(0)
-
-    async def astream(self, messages):
-        for t in self._stream_tokens:
-            yield AIMessageChunk(content=t)
+from fake_model import FakeModel
 
 
 @pytest.fixture(autouse=True)
@@ -115,3 +98,31 @@ async def test_chat_unknown_conversation_emits_error_frame(db_session_factory, d
 async def test_chat_empty_message_422():
     status, _ = await _post_chat({"user_id": "u1", "message": ""})
     assert status == 422
+
+
+async def test_chat_db_error_emits_error_frame(db_session_factory, db_clean, monkeypatch):
+    async def fake_stream(*a, **k):
+        raise SQLAlchemyError("db down")
+        yield  # pragma: no cover - 使其成为 async generator
+    monkeypatch.setattr(agent, "stream_agent_turn", fake_stream)
+    use_model(FakeModel([]))
+
+    status, text = await _post_chat({"user_id": "u1", "message": "hi"})
+    sse = parse_sse(text)
+    assert status == 200
+    assert sse["error"] == "数据库暂时不可用,请稍后重试"
+    assert sse["finished"] is False
+
+
+async def test_chat_upstream_error_emits_error_frame(db_session_factory, db_clean, monkeypatch):
+    async def fake_stream(*a, **k):
+        raise RuntimeError("upstream boom")
+        yield  # pragma: no cover
+    monkeypatch.setattr(agent, "stream_agent_turn", fake_stream)
+    use_model(FakeModel([]))
+
+    status, text = await _post_chat({"user_id": "u1", "message": "hi"})
+    sse = parse_sse(text)
+    assert status == 200
+    assert sse["error"] == "上游模型暂时不可用,请稍后重试"
+    assert sse["finished"] is False

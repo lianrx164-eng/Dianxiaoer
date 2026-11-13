@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     # 提取任务的上游思考开关。默认 None = 不发送该参数,保证换上游只改 .env;
     # DeepSeek 需设 disabled(思考模式不支持强制 tool_choice)
     extract_thinking: str | None = None
-    database_url: str = "mysql+asyncmy://root:root@localhost:3306/mewhelp?charset=utf8mb4"
+    database_url: str = "mysql+asyncmy://root:root@localhost:3306/mewhelp_ch02?charset=utf8mb4"
     test_database_url: str = "mysql+asyncmy://root:root@localhost:3306/mewhelp_test?charset=utf8mb4"
 
 

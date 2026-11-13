@@ -23,17 +23,22 @@ SAMPLES = [
 
 async def main() -> None:
     passed = 0
-    async with httpx.AsyncClient(timeout=120) as client:
+    async with httpx.AsyncClient(timeout=120, trust_env=False) as client:
+        # trust_env=False:只连本机服务,避免被 Windows 系统代理(如 Clash)劫持成 502
         for msg, expect in SAMPLES:
             r = await client.post(f"{BASE}/api/agent", json={"user_id": "eval", "message": msg})
+            if r.status_code != 200:
+                print(f"❌ {msg!r} -> HTTP {r.status_code} {r.text[:80]}")
+                continue
             body = r.json()
             names = {tc["name"] for tc in body["tool_calls"]}
             ok = (not names) if expect is None else bool(names & expect)
             passed += ok
             note = ""
             if msg == "邮费是多少":
+                # 同轮可能并行发多张 query_faq(如「邮费」+「运费」):全部未命中才算漏召回
                 faq = [tr for tr in body["tool_results"] if tr["name"] == "query_faq"]
-                miss = bool(faq) and '"hits": []' in faq[0]["content"]
+                miss = bool(faq) and all('"hits": []' in tr["content"] for tr in faq)
                 note = f" [漏召回={'是' if miss else '否'}]"
             print(f"{'✅' if ok else '❌'} {msg!r} -> {names or '(未调用)'} 期望={expect}{note}")
             print(f"    answer: {body['answer'][:60]}")

@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 from langchain_core.messages import ToolMessage
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core import agent
 from app.core.agent import AgentResult
@@ -42,3 +43,21 @@ def test_agent_endpoint_404_on_unknown_conversation(monkeypatch):
 def test_agent_endpoint_422_on_missing_fields():
     client = TestClient(app)
     assert client.post("/api/agent", json={"message": "hi"}).status_code == 422
+
+
+def test_agent_endpoint_503_on_db_error(monkeypatch):
+    async def fake_run(*a, **k):
+        raise SQLAlchemyError("db down")
+    monkeypatch.setattr(agent, "run_agent_turn", fake_run)
+    r = TestClient(app).post("/api/agent", json={"user_id": "u1", "message": "hi"})
+    assert r.status_code == 503
+    assert "数据库" in r.json()["detail"]
+
+
+def test_agent_endpoint_502_on_upstream_error(monkeypatch):
+    async def fake_run(*a, **k):
+        raise RuntimeError("upstream boom")
+    monkeypatch.setattr(agent, "run_agent_turn", fake_run)
+    r = TestClient(app).post("/api/agent", json={"user_id": "u1", "message": "hi"})
+    assert r.status_code == 502
+    assert "上游" in r.json()["detail"]

@@ -22,7 +22,8 @@ demo = [
     ("验收3:换说法(query_faq 漏召回为预期)", "邮费是多少"),
 ]
 for title, msg in demo:
-    r = httpx.post(f"{base}/api/agent", json={"user_id": "demo", "message": msg}, timeout=120)
+    r = httpx.post(f"{base}/api/agent", json={"user_id": "demo", "message": msg},
+                   timeout=120, trust_env=False)   # 只连本机,绕开系统代理
     body = r.json()
     print("==", title, "==")
     print("tools:", [tc["name"] for tc in body["tool_calls"]])

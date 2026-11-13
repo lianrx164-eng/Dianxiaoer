@@ -13,19 +13,14 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.config import settings
+from app.db.sql_script import split_statements
 
 _DDL = pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch02-ddl.sql"
 _TABLES = ["messages", "tickets", "conversations", "faq"]  # 删除顺序:先子表后父表
 
 
 def _ddl_statements() -> list[str]:
-    """去掉 -- 行注释后再按 ; 切分。顺序不能反:DDL 注释里含半角分号
-    (如「…数据源;ch03 起…」),先切分会把注释劈成两半,第二半失去 -- 前缀。"""
-    text = "\n".join(
-        ln for ln in _DDL.read_text(encoding="utf-8").splitlines()
-        if not ln.strip().startswith("--")
-    )
-    return [s.strip() for s in text.split(";") if s.strip()]
+    return split_statements(_DDL.read_text(encoding="utf-8"))
 
 
 @pytest_asyncio.fixture(scope="session")

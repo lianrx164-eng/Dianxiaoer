@@ -566,8 +566,8 @@
           textEl.classList.remove('streaming');
           const msg = err && err.message ? err.message : '未知错误';
           if (bubble.parentElement) bubble.parentElement.remove();
-          // 本地存的会话 id 已失效(库重置/换环境/垃圾值):清掉并用新会话自动重试一次
-          const staleConversation = conversationId && (msg === '会话不存在' || msg === 'HTTP 422');
+          // 只对「会话不存在」自愈;422 可能是别的校验失败(如空消息),重试无益
+          const staleConversation = conversationId && msg === '会话不存在';
           if (!retried && staleConversation) {
             retried = true;
             saveConversationId(null);
