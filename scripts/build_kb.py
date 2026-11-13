@@ -3,8 +3,7 @@
 import asyncio
 import sys
 
-from app.db import repository
-from app.kb import dedup, documents, dualwrite, sources
+from app.kb import documents, dualwrite, sources
 
 
 async def main() -> None:
@@ -13,12 +12,10 @@ async def main() -> None:
     for fname, ctype in sources.SOURCE_TYPES.items():
         md = (sources.KB_DIR / fname).read_text(encoding="utf-8")
         chunks = documents.build_chunks(md, content_type=ctype)
-        existing = await repository.list_chunk_pairs()
-        fresh = dedup.filter_new_chunks(chunks, existing)
-        skipped += len(chunks) - len(fresh)
-        ids = await dualwrite.write_pending(fresh) if fresh else []
+        ids, dup = await dualwrite.write_new_chunks(chunks)
         total += len(ids)
-        print(f"  {fname}: 新增 {len(ids)} 块,跳过重复 {len(chunks) - len(ids)} 块")
+        skipped += dup
+        print(f"  {fname}: 新增 {len(ids)} 块,跳过重复 {dup} 块")
     print(f"✅ 建库(pending):新增 {total} 块,跳过重复 {skipped} 块。下一步:scripts/vectorize_kb.py")
 
 

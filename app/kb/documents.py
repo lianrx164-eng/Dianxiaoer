@@ -2,7 +2,8 @@ from dataclasses import dataclass
 
 from app.kb import chunking
 
-_KEY_TERMS = ("退款", "退货", "时效", "运费", "邮费", "费用", "保修", "赔偿", "期限", "包邮")
+# 源文档约定:标题里带【关键】标记的章节算关键条款;标记只用于识别,不进 questions/section_path
+KEY_MARKER = "【关键】"
 
 
 @dataclass
@@ -15,9 +16,8 @@ class Chunk:
     is_key_clause: int = 0
 
 
-def _is_key(title: str, body: str) -> int:
-    head = title + body[:40]
-    return int(any(t in head for t in _KEY_TERMS))
+def _strip_marker(title: str) -> str:
+    return title.replace(KEY_MARKER, "").strip()
 
 
 def build_chunks(
@@ -26,7 +26,9 @@ def build_chunks(
 ) -> list[Chunk]:
     out: list[Chunk] = []
     for sec in chunking.split_sections(md):
-        path = [sec.metadata[k] for k in ("h1", "h2", "h3", "h4") if sec.metadata.get(k)]
+        raw_path = [sec.metadata[k] for k in ("h1", "h2", "h3", "h4") if sec.metadata.get(k)]
+        is_key = int(any(KEY_MARKER in seg for seg in raw_path))
+        path = [_strip_marker(seg) for seg in raw_path]
         section_path = " / ".join(path)
         title = path[-1] if path else content_type
         # category:政策/手册用上级标题路径;顶层无上级则用本节点或 content_type
@@ -43,6 +45,6 @@ def build_chunks(
             out.append(Chunk(
                 category=category, questions=title, answer=piece,
                 section_path=section_path, content_type=content_type,
-                is_key_clause=_is_key(title, piece),
+                is_key_clause=is_key,
             ))
     return out

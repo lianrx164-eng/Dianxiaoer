@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+
 from pymilvus import CollectionSchema, DataType, FieldSchema, MilvusClient
 
 from app.config import settings
@@ -8,6 +10,17 @@ DIM = 1024
 
 def get_client(uri: str | None = None) -> MilvusClient:
     return MilvusClient(uri=uri or settings.milvus_uri)
+
+
+@contextmanager
+def session(uri: str | None = None):
+    """一次请求/一段逻辑的客户端生命周期:确保集合存在,退出时关闭。"""
+    client = get_client(uri)
+    try:
+        ensure_collection(client)
+        yield client
+    finally:
+        client.close()
 
 
 def ensure_collection(client: MilvusClient) -> None:

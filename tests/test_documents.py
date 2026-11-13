@@ -2,14 +2,14 @@ from app.kb.documents import Chunk, build_chunks
 
 
 def test_policy_maps_heading_and_parent_path():
-    md = "# 售后政策\n\n## 运费说明\n\n单笔订单满99元包邮,未满收取10元运费。偏远地区另计。"
+    md = "# 售后政策\n\n## 运费说明【关键】\n\n单笔订单满99元包邮,未满收取10元运费。偏远地区另计。"
     chunks = build_chunks(md, content_type="policy")
     c = [c for c in chunks if c.questions == "运费说明"][0]
     assert c.category == "售后政策"
     assert c.section_path == "售后政策 / 运费说明"
     assert "满99" in c.answer
     assert c.content_type == "policy"
-    assert c.is_key_clause == 1  # 含「运费」关键条款
+    assert c.is_key_clause == 1  # 标题带【关键】约定标记
 
 
 def test_table_section_splits_by_rows_with_header():
@@ -25,3 +25,17 @@ def test_table_section_splits_by_rows_with_header():
 def test_returns_chunk_dataclass():
     chunks = build_chunks("# A\n\n## B\n\n正文。", content_type="faq")
     assert isinstance(chunks[0], Chunk)
+
+
+def test_key_clause_follows_heading_marker():
+    md = "# 售后政策\n\n## 运费说明【关键】\n\n满99包邮。"
+    c = build_chunks(md, content_type="policy")[0]
+    assert c.questions == "运费说明"          # 标记从标题中剥掉
+    assert c.section_path == "售后政策 / 运费说明"
+    assert c.is_key_clause == 1
+
+
+def test_unmarked_heading_is_not_key_clause():
+    md = "# 售后政策\n\n## 客服时间\n\n每日 9:00-21:00。"
+    c = build_chunks(md, content_type="policy")[0]
+    assert c.is_key_clause == 0

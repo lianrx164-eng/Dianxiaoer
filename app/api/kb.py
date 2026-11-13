@@ -25,7 +25,6 @@ class IngestRequest(PreviewRequest):
 class SearchRequest(BaseModel):
     query: str
     top_k: int = 3
-    route: str = "dense"
 
 
 def _resolve(req: PreviewRequest) -> tuple[str, str]:
@@ -39,10 +38,6 @@ def _resolve(req: PreviewRequest) -> tuple[str, str]:
     if req.content_type not in sources.CONTENT_TYPES:
         raise HTTPException(status_code=400, detail="content_type 不合法")
     return req.markdown, req.content_type
-
-
-def _fingerprint(questions: str, answer: str) -> str:
-    return dedup.fingerprint(questions, answer)
 
 
 def _chunk_view(c: documents.Chunk, duplicate: bool) -> dict:
@@ -77,17 +72,14 @@ async def overview() -> dict:
         staging = None
 
     milvus_count = None
-    client = None
     try:
-        client = milvus_client.get_client()
-        milvus_client.ensure_collection(client)
-        milvus_count = milvus_client.count(client)
+        with milvus_client.session() as client:
+            milvus_count = milvus_client.count(client)
     except Exception:
         pass
-    finally:
-        if client is not None:
-            client.close()
-    consistent = None if (stats is None or milvus_count is None) else stats["total"] == milvus_count
+    consistent = dualwrite.consistency(
+        stats["total"] if stats is not None else None, milvus_count
+    )
 
     materials = []
     for fname, ctype in sources.SOURCE_TYPES.items():
@@ -126,8 +118,15 @@ async def overview() -> dict:
 async def preview(req: PreviewRequest) -> dict:
     md, ctype = _resolve(req)
     chunks = _build(req, md, ctype)
-    existing = {_fingerprint(q, a) for q, a in await repository.list_chunk_pairs()}
-    views = [_chunk_view(c, _fingerprint(c.questions, c.answer) in existing) for c in chunks]
+    existing = {dedup.fingerprint(q, a) for q, a in await repository.list_chunk_pairs()}
+    seen = set(existing)
+    views = []
+    for c in chunks:
+        fp = dedup.fingerprint(c.questions, c.answer)
+        duplicate = fp in seen
+        if not duplicate:
+            seen.add(fp)
+        views.append(_chunk_view(c, duplicate))
     return {
         "content_type": ctype,
         "chunks": views,
@@ -144,43 +143,30 @@ async def preview(req: PreviewRequest) -> dict:
 async def ingest(req: IngestRequest) -> dict:
     md, ctype = _resolve(req)
     chunks = _build(req, md, ctype)
+    ids, skipped = await dualwrite.write_new_chunks(chunks)
 
-    existing = await repository.list_chunk_pairs()
-    fresh = dedup.filter_new_chunks(chunks, existing)
-
-    ids = await dualwrite.write_pending(fresh) if fresh else []
     vectorized = 0
     if req.vectorize and ids:
-        client = None
         try:
-            client = milvus_client.get_client()
-            milvus_client.ensure_collection(client)
-            vectorized = await dualwrite.vectorize_pending(client)
+            with milvus_client.session() as client:
+                vectorized = await dualwrite.vectorize_pending(client)
         except Exception as exc:
             raise HTTPException(
                 status_code=502,
                 detail=f"已入库 {len(ids)} 块(pending),补跑一次即可:向量化失败:{exc}",
             ) from exc
-        finally:
-            if client is not None:
-                client.close()
-    return {"inserted": len(ids), "skipped": len(chunks) - len(ids),
+    return {"inserted": len(ids), "skipped": skipped,
             "vectorized": vectorized, "ids": ids}
 
 
 @router.post("/vectorize")
 async def vectorize() -> dict:
-    client = None
     try:
-        client = milvus_client.get_client()
-        milvus_client.ensure_collection(client)
-        n = await dualwrite.vectorize_pending(client)
-        total = milvus_client.count(client)
+        with milvus_client.session() as client:
+            n = await dualwrite.vectorize_pending(client)
+            total = milvus_client.count(client)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"向量化失败,补跑一次即可:{exc}") from exc
-    finally:
-        if client is not None:
-            client.close()
     return {"vectorized": n, "milvus_count": total}
 
 
@@ -188,17 +174,13 @@ async def vectorize() -> dict:
 async def reset() -> dict:
     """清库重建:drop Milvus 集合 + TRUNCATE knowledge_chunks。
     Milvus Lite 单进程独占数据目录,所以清库必须在本进程内做,不能走 make 子进程。"""
-    client = None
     try:
-        client = milvus_client.get_client()
-        if client.has_collection(milvus_client.COLLECTION):
-            client.drop_collection(milvus_client.COLLECTION)
+        with milvus_client.session() as client:
+            if client.has_collection(milvus_client.COLLECTION):
+                client.drop_collection(milvus_client.COLLECTION)
         await repository.truncate_knowledge_chunks()
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"清库失败:{exc}") from exc
-    finally:
-        if client is not None:
-            client.close()
     return {"reset": True}
 
 
@@ -206,13 +188,11 @@ async def reset() -> dict:
 async def search(req: SearchRequest) -> dict:
     if not req.query.strip():
         raise HTTPException(status_code=400, detail="检索问题不能为空")
-    if req.route != "dense":
-        raise HTTPException(status_code=400, detail="本章只支持 dense 向量单路")
     try:
         hits = await retrieval.search_knowledge(req.query, top_k=req.top_k)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"嵌入或向量库不可用:{exc}") from exc
-    return {"route": "dense", "hits": hits}
+    return {"hits": hits}
 
 
 @router.get("/staging")

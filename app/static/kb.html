@@ -81,7 +81,6 @@
     <div class="row">
       <label>问题<input id="searchQuery" type="text" placeholder="邮费是多少"></label>
       <label>Top-K<input id="searchTopK" type="number" value="3"></label>
-      <label>路线<select id="searchRoute"><option value="dense">dense 向量单路</option></select></label>
     </div>
     <div class="btnrow">
       <button class="btn" id="searchBtn" type="button">检索</button>
@@ -102,6 +101,7 @@
   mountAdminNav('kb');
   const { el, getJSON, pill, fmt } = AC;
   const jobTailCache = {};
+  const jobSpecs = {};
 
   function statBox(label, value) {
     return el('div', { class: 'stat' }, [
@@ -119,6 +119,7 @@
       renderDual(o);
       renderRecent(o.recent);
       if (o.jobs) o.jobs.forEach((j) => {
+        jobSpecs[j.name] = j;
         if (j.log_tail) jobTailCache[j.name] = j.log_tail;
         const pre = document.querySelector('[data-job="' + j.name + '"]');
         if (pre) pre.textContent = jobTailCache[j.name] || '';
@@ -359,7 +360,6 @@
         body: JSON.stringify({
           query: document.getElementById('searchQuery').value,
           top_k: Number(document.getElementById('searchTopK').value) || 3,
-          route: document.getElementById('searchRoute').value,
         }),
       });
       out.innerHTML = '';
@@ -399,7 +399,8 @@
     const wrap = el('div');
     names.forEach((name) => {
       const statusEl = el('span', { class: 'muted', text: '' });
-      const btn = el('button', { class: 'btn' + (name === 'kb-mine' || name === 'kb-reset' ? ' heavy' : ''), text: '重跑 ' + name });
+      const heavy = !!(jobSpecs[name] && jobSpecs[name].heavy);
+      const btn = el('button', { class: 'btn' + (heavy ? ' heavy' : ''), text: '重跑 ' + name });
       const logEl = el('pre', { class: 'log', text: jobTailCache[name] || '' });
       logEl.dataset.job = name;
       btn.onclick = () => startJob(name, btn, statusEl, logEl);
@@ -410,7 +411,8 @@
   }
 
   async function startJob(name, btn, statusEl, logEl) {
-    if ((name === 'kb-mine' || name === 'kb-reset') && !confirm('作业 ' + name + ' 较重,确认执行?')) return;
+    const heavy = !!(jobSpecs[name] && jobSpecs[name].heavy);
+    if (heavy && !confirm('作业 ' + name + ' 较重,确认执行?')) return;
     btn.disabled = true;
     statusEl.textContent = '发起中…';
     try {

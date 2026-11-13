@@ -1,7 +1,14 @@
 from app.core import embeddings
 from app.db import repository
-from app.kb import milvus_client
+from app.kb import dedup, milvus_client
 from app.kb.documents import Chunk
+
+
+def consistency(total: int | None, milvus_count: int | None) -> bool | None:
+    """None = 读不到;True/False = 知识块总数与 Milvus 条数是否一致。"""
+    if total is None or milvus_count is None:
+        return None
+    return total == milvus_count
 
 
 async def write_pending(chunks: list[Chunk]) -> list[int]:
@@ -19,6 +26,14 @@ async def write_pending(chunks: list[Chunk]) -> list[int]:
         next_id = ids[i + 1] if i < len(ids) - 1 else None
         await repository.set_chunk_neighbors(cid, prev_id, next_id)
     return ids
+
+
+async def write_new_chunks(chunks: list[Chunk]) -> tuple[list[int], int]:
+    """按指纹跳过库里已有的块后写入 pending,返回 (新插入 ids, 跳过数)。"""
+    existing = await repository.list_chunk_pairs()
+    fresh = dedup.filter_new_chunks(chunks, existing)
+    ids = await write_pending(fresh) if fresh else []
+    return ids, len(chunks) - len(ids)
 
 
 def _batches(items: list, size: int):

@@ -64,6 +64,9 @@ async def test_reset_clears_mysql_and_milvus(client, db_session_factory, db_clea
         def has_collection(self, name):
             return True
 
+        def load_collection(self, name):
+            pass
+
         def drop_collection(self, name):
             self.dropped.append(name)
 
@@ -71,8 +74,18 @@ async def test_reset_clears_mysql_and_milvus(client, db_session_factory, db_clea
             pass
 
     fake = FakeMilvus()
-    monkeypatch.setattr("app.api.kb.milvus_client.get_client", lambda: fake)
+    monkeypatch.setattr("app.api.kb.milvus_client.get_client", lambda uri=None: fake)
     r = await client.post("/api/kb/reset")
-    assert r.status_code == 200
+    assert r.status_code == 200, r.text
     assert fake.dropped == ["knowledge"]
     assert (await repository.knowledge_stats())["total"] == 0
+
+
+async def test_preview_marks_duplicates_within_payload(client, db_session_factory, db_clean):
+    # 两个父节下的同名小节 + 相同正文 → 指纹相同,第二块应标重复
+    md = "# A\n\n## 小节\n\n相同正文。\n\n# B\n\n## 小节\n\n相同正文。"
+    r = await client.post("/api/kb/preview", json={"markdown": md, "content_type": "policy"})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["counts"]["duplicates"] == 1  # 预览与入库同样做批内查重
+    assert data["chunks"][1]["duplicate"] is True

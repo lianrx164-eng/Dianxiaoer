@@ -10,12 +10,10 @@ async def search_knowledge(
     top_k = top_k or settings.retrieval_top_k
     min_score = settings.retrieval_min_score if min_score is None else min_score
     vector = await embeddings.embed_query(query)
-    owned = client is None
-    client = client or milvus_client.get_client()
-    try:
+    if client is not None:
         milvus_client.ensure_collection(client)
         hits = milvus_client.search(client, vector, top_k)
-    finally:
-        if owned:
-            client.close()
+    else:
+        with milvus_client.session() as owned:
+            hits = milvus_client.search(owned, vector, top_k)
     return [h for h in hits if h["score"] >= min_score]
