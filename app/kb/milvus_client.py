@@ -34,6 +34,15 @@ def close_client(client: MilvusClient) -> None:
         _ensured.clear()
 
 
+def release() -> None:
+    """主动释放进程内单例,给离线 CLI(建库/评估)让出 Lite 独占锁。"""
+    global _CLIENT
+    if _CLIENT is not None:
+        _CLIENT.close()
+        _CLIENT = None
+        _ensured.clear()
+
+
 @contextmanager
 def session(uri: str | None = None):
     """一次请求/一段逻辑的客户端生命周期:确保集合存在,退出时关闭。"""

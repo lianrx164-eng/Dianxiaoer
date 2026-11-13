@@ -83,6 +83,11 @@ def start(name: str) -> dict:
         if old is not None:
             old.close()
 
+        if name == "eval-rag":
+            # 离线评估子进程要打开 Lite 数据目录,先让出进程内单例锁
+            from app.kb import milvus_client
+            milvus_client.release()
+
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         handle = open(_log_path(name), "w", encoding="utf-8")
         kwargs: dict = dict(
