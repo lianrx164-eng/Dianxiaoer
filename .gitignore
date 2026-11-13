@@ -7,3 +7,5 @@ __pycache__/
 data/*.db*
 # 临时探测脚本
 .scratch/
+# 页面作业日志
+log/

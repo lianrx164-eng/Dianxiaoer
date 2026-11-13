@@ -190,3 +190,62 @@ async def list_conversations_with_messages() -> list[tuple[int, list[Message]]]:
             )).scalars())
             out.append((cid, msgs))
         return out
+
+
+async def knowledge_stats() -> dict:
+    async with db.async_session() as s:
+        async def _count(*where):
+            q = select(func.count()).select_from(KnowledgeChunk)
+            for w in where:
+                q = q.where(w)
+            return int((await s.execute(q)).scalar_one())
+
+        return {
+            "total": await _count(),
+            "pending": await _count(KnowledgeChunk.vectorize_status == "pending"),
+            "done": await _count(KnowledgeChunk.vectorize_status == "done"),
+            "key_clause": await _count(KnowledgeChunk.is_key_clause == 1),
+        }
+
+
+async def list_recent_chunks(limit: int = 10) -> list[KnowledgeChunk]:
+    async with db.async_session() as s:
+        result = await s.execute(
+            select(KnowledgeChunk).order_by(KnowledgeChunk.id.desc()).limit(limit)
+        )
+        return list(result.scalars())
+
+
+async def list_chunk_pairs() -> list[tuple[str, str]]:
+    async with db.async_session() as s:
+        result = await s.execute(select(KnowledgeChunk.questions, KnowledgeChunk.answer))
+        return list(result.all())
+
+
+async def staging_stats() -> dict:
+    async with db.async_session() as s:
+        rows = (
+            await s.execute(
+                select(QaExtractionStaging.status, func.count())
+                .group_by(QaExtractionStaging.status)
+            )
+        ).all()
+        counts = {"extracted": 0, "kept": 0, "discarded": 0}
+        for status, n in rows:
+            counts[status] = int(n)
+        batches = (
+            await s.execute(
+                select(func.count(func.distinct(QaExtractionStaging.batch_no)))
+            )
+        ).scalar_one()
+        return {"counts": counts, "batches": int(batches)}
+
+
+async def list_staging(limit: int = 200) -> list[QaExtractionStaging]:
+    async with db.async_session() as s:
+        result = await s.execute(
+            select(QaExtractionStaging)
+            .order_by(QaExtractionStaging.id.desc())
+            .limit(limit)
+        )
+        return list(result.scalars())

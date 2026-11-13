@@ -1,4 +1,4 @@
-.PHONY: dev test eval seed eval-agent kb-build kb-vectorize kb-mine eval-retrieval seed-conv eval-mining
+.PHONY: dev test eval seed eval-agent kb-preview kb-build kb-vectorize kb-mine kb-reset eval-retrieval seed-conv eval-mining
 
 dev:
 	./scripts/dev.sh
@@ -18,6 +18,9 @@ eval-agent:
 	uv run python scripts/eval_agent.py
 
 # ch03 知识库:文档切块 → pending;再向量化进 Milvus
+kb-preview:
+	PYTHONPATH=. uv run python scripts/preview_kb.py
+
 kb-build:
 	PYTHONPATH=. uv run python scripts/build_kb.py
 
@@ -26,6 +29,10 @@ kb-vectorize:
 
 kb-mine:
 	PYTHONPATH=. uv run python scripts/mine_knowledge.py
+
+# 清空知识库(TRUNCATE knowledge_chunks + drop Milvus 集合),重建前用
+kb-reset:
+	PYTHONPATH=. uv run python scripts/reset_kb.py
 
 eval-retrieval:
 	PYTHONPATH=. uv run python scripts/eval_retrieval.py
