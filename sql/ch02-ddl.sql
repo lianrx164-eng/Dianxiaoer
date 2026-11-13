@@ -5,6 +5,7 @@
 -- 全库统一 ENGINE=InnoDB、CHARSET=utf8mb4
 -- 建表顺序:先 conversations,再依赖它的 messages / tickets
 -- =============================================================
+SET NAMES utf8mb4;
 
 -- 会话壳:一通对话的统一身份,messages / tickets 都引用它
 CREATE TABLE conversations (

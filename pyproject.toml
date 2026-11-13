@@ -3,10 +3,12 @@ name = "mewhelp"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
+    "asyncmy>=0.2.9",
     "fastapi>=0.162.5",
     "langchain>=1.5.0",
     "langchain-openai>=1.7.4",
     "pydantic-settings>=2.16.2",
+    "sqlalchemy[asyncio]>=2.0.0",
     "uvicorn[standard]>=0.54.0",
 ]
 
@@ -19,4 +21,8 @@ dev = [
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# DB 引擎按 session 作用域建在同一个事件循环里;若 fixture 与测试分属不同
+# loop,连接池里的连接跨 loop 使用会报 proactor 'NoneType' has no attribute 'send'
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
