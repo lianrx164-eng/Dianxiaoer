@@ -108,3 +108,12 @@ FAITHFULNESS_SYSTEM = """你是回答忠实度评审员。给定检索证据和�
 FAITHFULNESS_PROMPT = ChatPromptTemplate.from_messages(
     [("system", FAITHFULNESS_SYSTEM), ("human", "检索证据:\n{evidence}\n\n客服回答:\n{answer}")]
 )
+
+ANSWER_COVERAGE_SYSTEM = """你是答案覆盖度评审员。给定标准答案要点列表(编号从 1 开始)和客服回答,逐条判断回答是否覆盖了该要点(意思一致即可,不要求逐字一致)。
+- covered:被覆盖要点的序号列表;一个都没覆盖返回空列表。
+- 只按回答实际内容判断,不要因为回答提到相关话题就算覆盖。"""
+
+ANSWER_COVERAGE_PROMPT = ChatPromptTemplate.from_messages(
+    [("system", ANSWER_COVERAGE_SYSTEM),
+     ("human", "标准答案要点:\n{points}\n\n客服回答:\n{answer}")]
+)
