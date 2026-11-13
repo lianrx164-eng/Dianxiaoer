@@ -125,3 +125,51 @@ PY
 ### 测试
 
     uv run pytest -q   # 需 MySQL 在跑;conftest 从 ch02/ch03 DDL 重建 mewhelp_test,单测不打真实嵌入 API
+
+---
+
+## Ch04:混合检索 + 重排 + 评估体系(RAG 进阶)
+
+`query_faq` 升级为完整 RAG 管线:Query 改写/同义词 → 元数据过滤 → dense + BM25 混合召回(`hybrid_search` + RRF)→ 百炼 `qwen3-rerank` 精排 Top-10 → 机械闸 + 生成前自评两道证据闸 → 首尾组装 + 编号证据。Milvus 沿用 Lite(milvus-lite 3.2.2 已支持原生 BM25,`jieba` 分词),不引入 Docker;代价是独占锁,离线建库/评估前先停服务。
+
+### 配置与建表
+
+`.env` 在 ch03 基础上可选加重排(不填则复用 `EMBED_API_KEY`):
+
+    RERANK_URL=https://maas.qianwenaiapi.com/api/v1/services/rerank/text-rerank/text-rerank
+    RERANK_MODEL=qwen3-rerank
+    # RERANK_API_KEY=sk-xxx
+
+在 `mewhelp_ch02` 上补 ch04 两张表:
+
+    mysql -uroot -p --default-character-set=utf8mb4 mewhelp_ch02 < sql/ch04-ddl.sql
+
+### 命令
+
+    make smoke-rag          # fail-fast:Milvus Lite BM25 + hybrid_search / 百炼 rerank
+    make kb-reset           # 重建前清空(先停服务)
+    make kb-build           # data/kb/*.md → knowledge_chunks(pending)
+    make kb-vectorize       # 嵌入 + BM25 text → Milvus
+    make eval-check         # 评估集自检:题数/去重/章节可命中/要点逐字在库
+    make eval-rag           # 四策略 × 五桶评估:检索 + 证据覆盖度 + 生成,落 data/ch04/reports/
+    make judge-check        # 拿台账里已处置个案重放裁判,不一致退出码 1
+
+### 页面
+
+- `/` 聊天页:回答里的 `[n]` 可点,弹出来源章节 + 原文;每段回答左下角 👍/👎,点一次点亮并锁定(纯前端采集)
+- `/kb` 知识库录入(沿用 ch03)
+- `/rag-eval` RAG 评估页:四项 KPI、四策略分桶图、完整数据表、生成质量、编造个案台账(可处置/退回)、就地重跑
+- `/admin` 后台首页:五张卡(新增 RAG 评估:最佳 MRR、评估集题数、库外拒答率)
+
+### 验收映射
+
+1. **四策略报告**:`make eval-rag` 跑完 `data/ch04/reports/rag_eval.{txt,json}`,`/rag-eval` 读同一份 json,不重算。
+2. **型号 BM25 命中**:`make eval-rag` 的 B 桶;CLI `search_knowledge('MH-W40 滤芯', strategy='bm25')` 命中型号小节。
+3. **引用可定位**:聊天页问「邮费是多少」,回答带 `[1]`,点击看到 `section_path` + 原文。
+4. **库外拒答 + 落池**:问「你们卖火星车吗」,明确拒答;`low_confidence_questions` 出现 `retrieval_low_conf` 或 `self_check` 记录。
+5. **满意度反馈**:任一回答左下角 👍/👎,点击后点亮、显示「已反馈」、两键锁定。
+
+### 测试
+
+    uv run pytest -q   # 需 MySQL;Milvus 测试用临时 Lite 文件,不碰 data/milvus_knowledge.db
+

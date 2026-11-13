@@ -12,6 +12,7 @@
 import argparse
 import asyncio
 import json
+import os
 import time
 from collections import defaultdict
 from datetime import datetime
@@ -20,7 +21,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from app.config import settings
-from app.core import retrieval
+from app.core import embeddings, retrieval
 from app.core.llm import get_chat_model
 from app.core.prompts import (
     ANSWER_COVERAGE_PROMPT, FAITHFULNESS_PROMPT, RAG_ANSWER_PROMPT,
@@ -34,6 +35,7 @@ D_BUCKET = "D_absent"
 RECALL_K = 5
 TOP_K = 10
 GEN_CONCURRENCY = 3
+RETRIEVAL_CONCURRENCY = int(os.getenv("EVAL_RETRIEVAL_CONCURRENCY", "2"))
 CALL_TIMEOUT = 45.0
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -138,7 +140,7 @@ def _citations(hits: list[dict]) -> list[dict]:
 def _judge_model():
     extra = ({"thinking": {"type": settings.extract_thinking}}
              if settings.extract_thinking else None)
-    return get_chat_model(extra_body=extra)
+    return get_chat_model(extra_body=extra, temperature=0)
 
 
 async def _try(coro, label: str):
@@ -178,7 +180,7 @@ def _is_refusal(answer: str) -> bool:
 
 
 async def _retrieve_all(samples: list[dict], strategies: list[str], client) -> dict:
-    sem = asyncio.Semaphore(8)
+    sem = asyncio.Semaphore(RETRIEVAL_CONCURRENCY)
 
     async def one(sample: dict, strategy: str):
         async with sem:
@@ -314,6 +316,17 @@ async def main() -> None:
     client = milvus_client.get_client()
     milvus_client.ensure_collection(client)
     kb_count = milvus_client.count(client)
+
+    # 同一 query 的四策略复用一份向量,少打 3/4 的嵌入调用
+    embed_cache: dict[str, list[float]] = {}
+    real_embed = embeddings.embed_query
+
+    async def cached_embed(q: str) -> list[float]:
+        if q not in embed_cache:
+            embed_cache[q] = await real_embed(q)
+        return embed_cache[q]
+
+    embeddings.embed_query = cached_embed
 
     _log(f"ch04 RAG eval @ {datetime.now():%Y-%m-%d %H:%M:%S}")
     _log(f"samples={len(samples)} (D={len(d_samples)}) strategies={strategies} "
