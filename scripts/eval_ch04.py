@@ -176,13 +176,14 @@ def _is_refusal(answer: str) -> bool:
     return any(m in answer for m in markers)
 
 
-async def _retrieve_all(samples: list[dict], strategies: list[str]) -> dict:
+async def _retrieve_all(samples: list[dict], strategies: list[str], client) -> dict:
     sem = asyncio.Semaphore(8)
 
     async def one(sample: dict, strategy: str):
         async with sem:
             hits = await _try(
-                retrieval.search_knowledge(sample["query"], strategy=strategy, top_k=TOP_K),
+                retrieval.search_knowledge(sample["query"], strategy=strategy,
+                                           top_k=TOP_K, client=client),
                 f"retrieval:{sample['id']}:{strategy}")
         return (sample["id"], strategy), hits or []
 
@@ -302,16 +303,14 @@ async def main() -> None:
                      if l.strip() and json.loads(l)["bucket"] == D_BUCKET]
     all_samples = samples + d_samples
 
-    try:
-        with milvus_client.session() as client:
-            kb_count = milvus_client.count(client)
-    except Exception:
-        kb_count = None
+    client = milvus_client.get_client()
+    milvus_client.ensure_collection(client)
+    kb_count = milvus_client.count(client)
 
     _log(f"ch04 RAG eval @ {datetime.now():%Y-%m-%d %H:%M:%S}")
     _log(f"samples={len(samples)} (D={len(d_samples)}) strategies={strategies} "
          f"kb_count={kb_count} judge={settings.chat_model}")
-    hits_map = await _retrieve_all(all_samples, strategies)
+    hits_map = await _retrieve_all(all_samples, strategies, client)
 
     retrieval_d = {}
     coverage_d = {}
