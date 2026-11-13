@@ -236,6 +236,33 @@
     color: #7a6a55;
   }
 
+  .cite { color: #b34700; font-weight: 700; cursor: pointer; padding: 0 1px; }
+  .cite:hover { background: #ffe9c2; }
+  .cite-pop {
+    position: fixed; z-index: 50; width: min(360px, 82vw);
+    background: #fffdf6; border: 2px solid #1c1c1c;
+    box-shadow: 5px 5px 0 rgba(28, 28, 28, 0.22);
+    padding: 10px 12px; font-size: 13px; line-height: 1.55;
+  }
+  .cite-pop .path { font-weight: 700; color: #b34700; margin-bottom: 6px; }
+  .cite-pop .q { font-weight: 600; margin-bottom: 4px; }
+  .cite-pop .a { white-space: pre-wrap; max-height: 220px; overflow: auto; }
+  .feedback {
+    display: flex; align-items: center; gap: 6px;
+    margin-top: 10px; font-size: 12px; color: #7a6a55;
+  }
+  .fb-btn {
+    border: 2px solid #1c1c1c; background: #fffdf6;
+    box-shadow: 2px 2px 0 #1c1c1c; padding: 2px 8px;
+    font-size: 14px; line-height: 1.2; cursor: pointer;
+  }
+  .fb-btn:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 #1c1c1c; }
+  .fb-btn.active { background: #ffe9c2; }
+  .fb-btn.dim { opacity: 0.35; }
+  .fb-btn:disabled { cursor: default; box-shadow: none; }
+  .fb-done { display: none; color: #2f7d32; font-weight: 600; }
+  .feedback.done .fb-done { display: inline; }
+
   @media (max-width: 560px) {
     body { padding: 0; place-items: stretch; }
     .app { width: 100%; height: 100vh; border: 0; box-shadow: none; }
@@ -366,6 +393,13 @@
     const textEl = document.createElement('div');
     textEl.className = 'text';
     bubble.append(toolsEl, textEl);
+    textEl.addEventListener('click', e => {
+      const el = e.target.closest('.cite');
+      if (!el) return;
+      const items = bubble._citations || [];
+      const item = items.find(c => String(c.n) === el.dataset.n);
+      if (item) showCitePop(el, item);
+    });
     row.append(avatar, bubble);
     messagesEl.append(row);
     scrollToBottom();
@@ -499,8 +533,88 @@
     return html.join('');
   }
 
-  async function sendMessage(text) {
-    text = text.trim();
+  // ---- 引用角标与来源浮层 ----
+  function renderWithCitations(src, items) {
+    const html = renderMarkdown(src);
+    if (!items || !items.length) return html;
+    const byN = new Map(items.map(c => [String(c.n), c]));
+    return html.replace(/\[(\d{1,2})\]/g, (m, n) =>
+      byN.has(n) ? '<sup class="cite" data-n="' + n + '">[' + n + ']</sup>' : m);
+  }
+
+  let citePop = null;
+  function hideCitePop() {
+    if (citePop) { citePop.remove(); citePop = null; }
+  }
+
+  function showCitePop(anchor, item) {
+    hideCitePop();
+    const pop = document.createElement('div');
+    pop.className = 'cite-pop';
+    const path = document.createElement('div');
+    path.className = 'path';
+    path.textContent = item.section_path || '来源';
+    const q = document.createElement('div');
+    q.className = 'q';
+    q.textContent = '问法:' + (item.question || '');
+    const a = document.createElement('div');
+    a.className = 'a';
+    a.textContent = item.answer || '';
+    pop.append(path, q, a);
+    document.body.append(pop);
+    const rect = anchor.getBoundingClientRect();
+    const width = pop.offsetWidth;
+    let left = Math.min(rect.left, window.innerWidth - width - 12);
+    left = Math.max(12, left);
+    let top = rect.bottom + 8;
+    if (top + pop.offsetHeight > window.innerHeight - 12) {
+      top = Math.max(12, rect.top - pop.offsetHeight - 8);
+    }
+    pop.style.left = left + 'px';
+    pop.style.top = top + 'px';
+    citePop = pop;
+  }
+
+  document.addEventListener('click', e => {
+    if (!citePop) return;
+    if (citePop.contains(e.target) || e.target.closest('.cite')) return;
+    hideCitePop();
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') hideCitePop(); });
+
+  // ---- 每段回答的满意度反馈(纯前端,一次性锁定) ----
+  function addFeedback(bubble) {
+    if (bubble.querySelector('.feedback')) return;
+    const bar = document.createElement('div');
+    bar.className = 'feedback';
+    const tip = document.createElement('span');
+    tip.textContent = '这段回答对你有帮助吗?';
+    const up = document.createElement('button');
+    up.type = 'button';
+    up.className = 'fb-btn';
+    up.textContent = '👍';
+    up.title = '有帮助';
+    const down = document.createElement('button');
+    down.type = 'button';
+    down.className = 'fb-btn';
+    down.textContent = '👎';
+    down.title = '没帮助';
+    const done = document.createElement('span');
+    done.className = 'fb-done';
+    done.textContent = '已反馈,谢谢!';
+    const choose = (picked, other) => {
+      picked.classList.add('active');
+      other.classList.add('dim');
+      up.disabled = down.disabled = true;
+      bar.classList.add('done');
+    };
+    up.addEventListener('click', () => choose(up, down));
+    down.addEventListener('click', () => choose(down, up));
+    bar.append(tip, up, down, done);
+    bubble.append(bar);
+  }
+
+  async function sendMessage(text) {    text = text.trim();
     if (!text || busy) return;
     setBusy(true);
     let retried = false;
@@ -514,6 +628,7 @@
         let rawText = '';
         let started = false;
         let upstreamError = null;
+        let citations = [];
 
         try {
           const res = await fetch('/api/chat', {
@@ -553,16 +668,23 @@
                 saveConversationId(payload.conversation_id);
                 continue;
               }
+              if (payload.event === 'citations') {
+                citations = Array.isArray(payload.items) ? payload.items : [];
+                bubble._citations = citations;
+                if (rawText) textEl.innerHTML = renderWithCitations(rawText, citations);
+                continue;
+              }
               if (typeof payload.delta === 'string') {
                 if (!started) { started = true; textEl.innerHTML = ''; }
                 rawText += payload.delta;
-                textEl.innerHTML = renderMarkdown(rawText);
+                textEl.innerHTML = renderWithCitations(rawText, citations);
                 scrollToBottom();
               }
             }
           }
           if (upstreamError) throw new Error(upstreamError);
           if (!rawText) textEl.textContent = '(小喵这次没有回复内容,请再试一次)';
+          else addFeedback(bubble);
           textEl.classList.remove('streaming');
           return;
         } catch (err) {
