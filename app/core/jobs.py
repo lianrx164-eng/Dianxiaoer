@@ -27,6 +27,7 @@ JOBS: dict[str, JobSpec] = {
         JobSpec("kb-build", "kb-build"),
         JobSpec("kb-mine", "kb-mine", heavy=True),
         JobSpec("seed-conv", "seed-conv"),
+        JobSpec("eval-rag", "eval-rag", heavy=True),
     ]
 }
 

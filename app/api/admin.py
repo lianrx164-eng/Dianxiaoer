@@ -72,6 +72,25 @@ async def _jobs_card() -> dict:
         return _card("jobs", "作业", "/kb", "读数失败", "作业运行器读不到", {})
 
 
+async def _rageval_card() -> dict:
+    from app.api import rageval
+    report = rageval._load()
+    if report is None:
+        return _card("rag-eval", "RAG 评估", "/rag-eval", "没跑过",
+                     "还没有评估报告,先跑一次 make eval-rag", {})
+    meta = report.get("meta") or {}
+    best = rageval._best(report.get("retrieval") or {})
+    refusal = ((report.get("generation") or {}).get("refusal") or {}).get("rate")
+    return _card(
+        "rag-eval", "RAG 评估", "/rag-eval", "正常",
+        f"最佳 MRR {best['mrr'] if best else '—'}({best['strategy'] if best else '—'}),"
+        f"评估集 {meta.get('eval_count', '—')} 题",
+        {"best_mrr": best["mrr"] if best else None,
+         "best_strategy": best["strategy"] if best else None,
+         "eval_count": meta.get("eval_count"), "refusal_rate": refusal},
+    )
+
+
 @router.get("/api/admin/overview")
 async def overview() -> dict:
     return {"cards": [
@@ -79,4 +98,5 @@ async def overview() -> dict:
         await _dualwrite_card(),
         await _staging_card(),
         await _jobs_card(),
+        await _rageval_card(),
     ]}

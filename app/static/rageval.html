@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAG 评估 · 喵喵优选</title>
+<link rel="stylesheet" href="/static/acceptance.css">
+</head>
+<body class="admin-page">
+<div class="admin-shell">
+  <div id="admin-nav"></div>
+
+  <div class="page-head">
+    <div>
+      <h1>RAG 评估</h1>
+      <p class="sub" id="metaLine">四策略分桶对照 · 报告只读产物,不重算</p>
+    </div>
+    <div class="actions">
+      <button class="btn primary heavy" id="rerunBtn" type="button">重跑 RAG 评估</button>
+    </div>
+  </div>
+
+  <div id="content"></div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <span class="num">⏱</span>
+      <h2>评估作业</h2>
+      <span class="hint" id="jobStatus">—</span>
+    </div>
+    <div class="panel-body">
+      <pre class="log" id="jobLog"></pre>
+      <div class="btnrow">
+        <button class="btn" id="goRunBtn" type="button">去跑一次</button>
+        <button class="btn" id="stopBtn" type="button">停止</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/static/acceptance.js"></script>
+<script src="/static/admin.js"></script>
+<script>
+(function () {
+  const el = AC.el;
+  const STRATS = [
+    ['vector', '纯向量'],
+    ['bm25', '纯 BM25'],
+    ['hybrid', '混合 RRF'],
+    ['hybrid_rerank', '混合+重排'],
+  ];
+  const BUCKETS = [
+    ['A_policy', 'A 政策/流程'],
+    ['B_model', 'B 型号/名词'],
+    ['C_colloquial', 'C 口语模糊'],
+    ['E_multi', 'E 跨文档'],
+  ];
+  const METRICS = [
+    ['mrr', 'MRR'],
+    ['recall@5', 'Recall@5'],
+    ['coverage', '证据覆盖度'],
+  ];
+  let data = null;
+  let metric = 'mrr';
+  let pollTimer = null;
+
+  function pct(v) { return v == null ? '—' : (v * 100).toFixed(1) + '%'; }
+  function num(v) { return v == null ? '—' : Number(v).toFixed(4); }
+  function stratName(k) {
+    const hit = STRATS.find(s => s[0] === k);
+    return hit ? hit[1] : k;
+  }
+  function metricValue(st, bucket, m) {
+    if (!data) return null;
+    if (m === 'coverage') {
+      const c = data.evidence_coverage || {};
+      return c[st] ? c[st][bucket] : null;
+    }
+    const r = data.retrieval || {};
+    return r[st] && r[st][bucket] ? r[st][bucket][m] : null;
+  }
+  function overallValue(st, m) {
+    if (m === 'coverage') {
+      const c = data.evidence_coverage || {};
+      return c[st] ? c[st].overall : null;
+    }
+    const r = data.retrieval || {};
+    return r[st] && r[st].overall ? r[st].overall[m] : null;
+  }
+
+  function barChart(rows) {
+    const chart = el('div', { class: 'chart' });
+    rows.forEach(function (row) {
+      const group = el('div', { class: 'group' }, [el('div', { class: 'glabel', text: row.label })]);
+      row.items.forEach(function (item, idx) {
+        const fill = el('i', { class: idx ? 'v' + (idx + 1) : '' });
+        fill.style.width = Math.max(0, Math.min(1, item.value || 0)) * 100 + '%';
+        group.append(el('div', { class: 'bar-row' }, [
+          el('span', { class: 'blabel', text: item.label }),
+          el('div', { class: 'bar-track' }, [fill]),
+          el('span', { class: 'bval', text: pct(item.value) }),
+        ]));
+      });
+      chart.append(group);
+    });
+    return chart;
+  }
+
+  function tile(label, value, cls, note) {
+    const node = el('div', { class: 'tile ' + (cls || '') }, [
+      el('b', { text: value }),
+      el('span', { text: label }),
+    ]);
+    if (note) node.append(el('div', { class: 'kpi-note', text: note }));
+    return node;
+  }
+
+  function renderHeader() {
+    if (!data || !data.present) return;
+    const m = data.meta || {};
+    document.getElementById('metaLine').textContent =
+      `评估集 ${AC.fmt(m.eval_count)} 题 · 知识库 ${AC.fmt(m.kb_count)} 块 · ` +
+      `嵌入 ${m.embed_model || '—'} · 重排 ${m.rerank_model || '—'} · ` +
+      `裁判 ${m.judge_model || '—'} · ${m.generated_at || '—'}`;
+  }
+
+  function renderKpis(container) {
+    const best = data.best ? data.best.mrr : null;
+    const cVec = metricValue('vector', 'C_colloquial', 'mrr');
+    const cRr = metricValue('hybrid_rerank', 'C_colloquial', 'mrr');
+    const lift = cVec != null && cRr != null ? cRr - cVec : null;
+    const gen = data.generation || {};
+    const cov = gen.answer_coverage && gen.answer_coverage.hybrid_rerank
+      ? gen.answer_coverage.hybrid_rerank.overall : null;
+    const refusal = gen.refusal ? gen.refusal.rate : null;
+    container.append(el('div', { class: 'stats' }, [
+      tile('最佳整体 MRR', num(best), 'hot', data.best ? stratName(data.best.strategy) : ''),
+      tile('口语桶 MRR 提升', lift == null ? '—' : ('+' + (lift * 100).toFixed(1) + 'pt'), 'ok', '混合+重排 vs 纯向量'),
+      tile('答案覆盖度', pct(cov), '', '上线管线'),
+      tile('库外拒答率', pct(refusal), refusal != null && refusal >= 0.9 ? 'ok' : 'bad', 'D 桶'),
+    ]));
+  }
+
+  function renderRetrieval(container) {
+    const panel = el('div', { class: 'panel' });
+    const head = el('div', { class: 'panel-head' }, [
+      el('span', { class: 'num', text: '1' }),
+      el('h2', { text: '检索质量' }),
+      el('span', { class: 'hint', text: '四策略 × 四个可作答桶' }),
+    ]);
+    const tabs = el('div', { class: 'tabs' });
+    METRICS.forEach(function (item) {
+      const btn = el('button', { type: 'button', text: item[1] });
+      if (item[0] === metric) btn.className = 'on';
+      btn.addEventListener('click', function () { metric = item[0]; render(); });
+      tabs.append(btn);
+    });
+    head.append(el('div', { class: 'actions' }, [tabs]));
+    panel.append(head);
+    const body = el('div', { class: 'panel-body' });
+    const rows = BUCKETS.map(function (b) {
+      return {
+        label: b[1],
+        items: STRATS.map(function (s) {
+          return { label: s[1], value: metricValue(s[0], b[0], metric) };
+        }),
+      };
+    });
+    body.append(barChart(rows));
+    body.append(el('p', { class: 'panel-note' },
+      ['读图:每组四根柱子按同一指标比较;MRR / Recall@5 只算 A/B/C/E,D 桶只看拒答率。']));
+    panel.append(body);
+    container.append(panel);
+  }
+
+  function renderTable(container) {
+    const panel = el('div', { class: 'panel' });
+    panel.append(el('div', { class: 'panel-head' }, [
+      el('span', { class: 'num', text: '2' }),
+      el('h2', { text: '完整数据' }),
+      el('span', { class: 'hint', text: '当前指标:' + (METRICS.find(m => m[0] === metric) || [])[1] }),
+    ]));
+    const body = el('div', { class: 'panel-body' });
+    const table = el('table', { class: 'tbl' });
+    const thead = el('thead');
+    const hr = el('tr');
+    hr.append(el('th', { text: '策略' }));
+    BUCKETS.forEach(b => hr.append(el('th', { class: 'num', text: b[1] })));
+    hr.append(el('th', { class: 'num', text: '总体' }));
+    thead.append(hr);
+    table.append(thead);
+    const tbody = el('tbody');
+    const vals = [];
+    STRATS.forEach(function (s) {
+      const tr = el('tr');
+      tr.append(el('td', { text: s[1] }));
+      BUCKETS.forEach(function (b) {
+        const v = metricValue(s[0], b[0], metric);
+        vals.push(v);
+        tr.append(el('td', { class: 'num', text: metric === 'mrr' ? num(v) : pct(v) }));
+      });
+      const ov = overallValue(s[0], metric);
+      tr.append(el('td', { class: 'num', text: metric === 'mrr' ? num(ov) : pct(ov) }));
+      tbody.append(tr);
+    });
+    table.append(tbody);
+    body.append(el('div', { class: 'tablerow' }, [table]));
+    panel.append(body);
+    container.append(panel);
+  }
+
+  function ring(rate) {
+    const pctv = Math.max(0, Math.min(1, rate == null ? 0 : rate)) * 100;
+    const node = el('div', { class: 'refusal-ring' });
+    node.style.background = `conic-gradient(var(--ok) ${pctv}%, #f2e7d2 0)`;
+    node.append(el('span', { text: pct(rate) }));
+    return node;
+  }
+
+  function renderGeneration(container) {
+    const panel = el('div', { class: 'panel' });
+    panel.append(el('div', { class: 'panel-head' }, [
+      el('span', { class: 'num', text: '3' }),
+      el('h2', { text: '生成质量' }),
+      el('span', { class: 'hint', text: data.generation_done ? '答案覆盖度 / 忠实度 / 拒答率' : '本次生成段未完成' }),
+    ]));
+    const body = el('div', { class: 'panel-body' });
+    if (!data.generation) {
+      body.append(el('div', { class: 'empty-state', text: '裁判上游本次未跑完;检索段与证据覆盖度照常呈现,补跑一次就齐。' }));
+      panel.append(body);
+      container.append(panel);
+      return;
+    }
+    const gen = data.generation;
+    const grid = el('div', { class: 'grid2' });
+    const left = el('div');
+    left.append(el('h3', { text: '四策略答案覆盖度' }));
+    const cov = gen.answer_coverage || {};
+    left.append(barChart([{
+      label: 'A/B/C/E 总体',
+      items: STRATS.map(s => ({
+        label: s[1], value: cov[s[0]] ? cov[s[0]].overall : null,
+      })),
+    }]));
+    const right = el('div');
+    right.append(el('h3', { text: '上线管线忠实度(hybrid_rerank)' }));
+    const faith = (gen.faithfulness || {}).hybrid_rerank || {};
+    right.append(barChart([{
+      label: '四桶忠实度',
+      items: BUCKETS.map(b => ({ label: b[1], value: faith[b[0]] }))
+        .concat([{ label: '总体', value: faith.overall }]),
+    }]));
+    right.append(el('h3', { text: '库外拒答率' }));
+    right.append(ring(gen.refusal ? gen.refusal.rate : null));
+    right.append(el('p', { class: 'kpi-note',
+      text: `D 桶 ${gen.refusal ? gen.refusal.refused : '—'} / ${gen.refusal ? gen.refusal.total : '—'} 题明确拒答` }));
+    grid.append(left, right);
+    body.append(grid);
+    panel.append(body);
+    container.append(panel);
+  }
+
+  function renderCases(container) {
+    const cases = data.generation && data.generation.faithfulness
+      && data.generation.faithfulness.hybrid_rerank
+      ? data.generation.faithfulness.hybrid_rerank.cases : [];
+    if (!cases || !cases.length) return;
+    const panel = el('div', { class: 'panel' });
+    panel.append(el('div', { class: 'panel-head' }, [
+      el('span', { class: 'num', text: '4' }),
+      el('h2', { text: '编造个案' }),
+      el('span', { class: 'hint', text: `${cases.length} 条,默认收起` }),
+    ]));
+    const body = el('div', { class: 'panel-body' });
+    const details = el('details');
+    details.append(el('summary', { text: '展开逐条看问题、生成答案、裁判理由' }));
+    cases.forEach(function (c) {
+      const item = el('details', { class: 'case' });
+      item.append(el('summary', { text: `${c.id} · ${c.query}` }));
+      item.append(el('div', { class: 'odd', text: '回答:\n' + (c.answer || '') }));
+      item.append(el('div', { class: 'odd', text: '裁判理由:' + (c.reason || '') }));
+      const list = el('ul', { class: 'cite-list' });
+      (c.citations || []).forEach(function (cit) {
+        list.append(el('li', { text: `[${cit.n}] ${cit.section_path} · ${cit.question}` }));
+      });
+      item.append(el('div', { class: 'odd', text: '这一轮喂给模型的证据全集:' }), list);
+      details.append(item);
+    });
+    body.append(details);
+    panel.append(body);
+    container.append(panel);
+  }
+
+  function renderMissing(container) {
+    const panel = el('div', { class: 'panel' });
+    panel.append(el('div', { class: 'panel-head' }, [
+      el('span', { class: 'num', text: '!' }),
+      el('h2', { text: '还没有评估报告' }),
+    ]));
+    const body = el('div', { class: 'panel-body' });
+    body.append(el('div', { class: 'empty-state', text: '先跑一次 make eval-rag;这里的数与终端产物是同一份。' }));
+    const btn = el('button', { class: 'btn primary', type: 'button', text: '重跑 RAG 评估' });
+    btn.addEventListener('click', startJob);
+    body.append(el('div', { class: 'btnrow' }, [btn]));
+    panel.append(body);
+    container.append(panel);
+  }
+
+  function render() {
+    const content = document.getElementById('content');
+    content.innerHTML = '';
+    if (!data || !data.present) {
+      renderMissing(content);
+      return;
+    }
+    renderHeader();
+    renderKpis(content);
+    renderRetrieval(content);
+    renderTable(content);
+    renderGeneration(content);
+    renderCases(content);
+  }
+
+  async function refresh() {
+    try {
+      data = await AC.getJSON('/api/rag-eval/overview');
+      render();
+    } catch (e) {
+      document.getElementById('content').innerHTML =
+        '<div class="panel"><div class="panel-body"><div class="empty-state">读取评估报告失败:' +
+        String(e.message || e) + '</div></div></div>';
+    }
+  }
+
+  function renderJob(job) {
+    const status = document.getElementById('jobStatus');
+    const log = document.getElementById('jobLog');
+    if (!job) { status.textContent = '—'; return; }
+    if (job.running) status.textContent = '运行中…';
+    else if (job.exit_code == null) status.textContent = '还没跑过';
+    else if (job.exit_code === 0) status.textContent = '上次跑完 exit=0';
+    else status.textContent = '上次失败 exit=' + job.exit_code;
+    log.textContent = job.log_tail || '';
+  }
+
+  async function pollJob() {
+    if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+    try {
+      const job = await AC.getJSON('/api/jobs/eval-rag');
+      renderJob(job);
+      if (job.running) {
+        pollTimer = setTimeout(pollJob, 2500);
+      } else if (job.exit_code === 0) {
+        await refresh();
+      }
+    } catch (e) { /* 作业还没注册时静默 */ }
+  }
+
+  async function startJob() {
+    if (!window.confirm('RAG 评估是分钟级重活,要现在重跑吗?')) return;
+    try {
+      await AC.getJSON('/api/jobs/eval-rag', { method: 'POST' });
+      pollJob();
+    } catch (e) {
+      alert('启动失败:' + (e.message || e));
+    }
+  }
+
+  mountAdminNav('rag-eval');
+  document.getElementById('rerunBtn').addEventListener('click', startJob);
+  document.getElementById('goRunBtn').addEventListener('click', startJob);
+  document.getElementById('stopBtn').addEventListener('click', async function () {
+    try { await AC.getJSON('/api/jobs/eval-rag/stop', { method: 'POST' }); pollJob(); }
+    catch (e) { alert('停止失败:' + (e.message || e)); }
+  });
+  refresh().then(pollJob);
+})();
+</script>
+</body>
+</html>
