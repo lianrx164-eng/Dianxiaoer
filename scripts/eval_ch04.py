@@ -12,7 +12,6 @@
 import argparse
 import asyncio
 import json
-import os
 import time
 from collections import defaultdict
 from datetime import datetime
@@ -35,7 +34,6 @@ D_BUCKET = "D_absent"
 RECALL_K = 5
 TOP_K = 10
 GEN_CONCURRENCY = 3
-RETRIEVAL_CONCURRENCY = int(os.getenv("EVAL_RETRIEVAL_CONCURRENCY", "2"))
 CALL_TIMEOUT = 45.0
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -184,18 +182,26 @@ def _is_refusal(answer: str) -> bool:
 
 
 async def _retrieve_all(samples: list[dict], strategies: list[str], client) -> dict:
-    sem = asyncio.Semaphore(RETRIEVAL_CONCURRENCY)
-
-    async def one(sample: dict, strategy: str):
-        async with sem:
-            hits = await _try(
-                retrieval.search_knowledge(sample["query"], strategy=strategy,
-                                           top_k=TOP_K, client=client),
-                f"retrieval:{sample['id']}:{strategy}")
-        return (sample["id"], strategy), hits or []
-
-    pairs = await asyncio.gather(*(one(s, st) for s in samples for st in strategies))
-    return dict(pairs)
+    jobs = [(s, st) for s in samples for st in strategies
+            if not (s["bucket"] == D_BUCKET and st != "hybrid_rerank")]
+    total = len(jobs)
+    out: dict = {}
+    _log(f"retrieval start: {total} calls")
+    for i, (sample, strategy) in enumerate(jobs, 1):
+        if i <= 3:
+            _log(f"  try {i}: {sample['id']} {strategy}")
+        hits = await _try(
+            retrieval.search_knowledge(sample["query"], strategy=strategy,
+                                       top_k=TOP_K, client=client),
+            f"retrieval:{sample['id']}:{strategy}")
+        if i <= 3:
+            _log(f"  done {i}: hits={len(hits or [])}")
+        out[(sample["id"], strategy)] = hits or []
+        if i % 20 == 0 or i == total:
+            _log(f"  retrieval {i}/{total}")
+        if i % 50 == 0:
+            await asyncio.sleep(0.05)
+    return out
 
 
 async def _generation(samples: list[dict], d_samples: list[dict],

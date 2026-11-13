@@ -133,9 +133,11 @@
     const cov = gen.answer_coverage && gen.answer_coverage.hybrid_rerank
       ? gen.answer_coverage.hybrid_rerank.overall : null;
     const refusal = gen.refusal ? gen.refusal.rate : null;
+    const liftText = lift == null ? '—'
+      : ((lift >= 0 ? '+' : '') + (lift * 100).toFixed(1) + 'pt');
     container.append(el('div', { class: 'stats' }, [
       tile('最佳整体 MRR', num(best), 'hot', data.best ? stratName(data.best.strategy) : ''),
-      tile('口语桶 MRR 提升', lift == null ? '—' : ('+' + (lift * 100).toFixed(1) + 'pt'), 'ok', '混合+重排 vs 纯向量'),
+      tile('口语桶 MRR 提升', liftText, 'ok', '混合+重排 vs 纯向量'),
       tile('答案覆盖度', pct(cov), '', '上线管线'),
       tile('库外拒答率', pct(refusal), refusal != null && refusal >= 0.9 ? 'ok' : 'bad', 'D 桶'),
     ]));
@@ -167,8 +169,8 @@
       };
     });
     body.append(barChart(rows));
-    body.append(el('p', { class: 'panel-note' },
-      ['读图:每组四根柱子按同一指标比较;MRR / Recall@5 只算 A/B/C/E,D 桶只看拒答率。']));
+    body.append(el('p', { class: 'panel-note',
+      text: '读图:每组四根柱子按同一指标比较;MRR / Recall@5 只算 A/B/C/E,D 桶只看拒答率。' }));
     panel.append(body);
     container.append(panel);
   }
@@ -323,8 +325,9 @@
       body.innerHTML = '';
       let data;
       try {
-        data = await AC.getJSON('/api/rag-eval/faith-cases?status=' +
-          encodeURIComponent(status) + '&page=' + page + '&size=10');
+        data = await AC.getJSON('/api/rag-eval/faith-cases?' +
+          (status ? 'status=' + encodeURIComponent(status) + '&' : '') +
+          'page=' + page + '&size=10');
       } catch (e) {
         body.append(el('div', { class: 'empty-state', text: '台账读取失败:' + (e.message || e) }));
         return;
