@@ -39,15 +39,19 @@ async def _hallucination(report: dict) -> dict | None:
     gen = report.get("generation") or {}
     faith = ((gen.get("faithfulness") or {}).get("hybrid_rerank") or {})
     cases = faith.get("cases") or []
-    if not cases:
-        return {"judged": 0, "confirmed": None, "eval_count": None,
-                "judged_rate": 0.0, "confirmed_rate": None, "ledger_total": None}
     eval_count = (report.get("meta") or {}).get("eval_count")
     try:
-        status_map = await repository.faith_case_status_map()
         ledger_total = await repository.faith_case_count()
     except Exception:
-        status_map, ledger_total = {}, None
+        ledger_total = None
+    if not cases:
+        return {"judged": 0, "confirmed": 0, "eval_count": eval_count,
+                "judged_rate": 0.0, "confirmed_rate": 0.0,
+                "ledger_total": ledger_total}
+    try:
+        status_map = await repository.faith_case_status_map()
+    except Exception:
+        status_map = {}
     current = {c["id"] for c in cases}
     confirmed = sum(1 for i in current if status_map.get(i) == "已解决")
     return {
