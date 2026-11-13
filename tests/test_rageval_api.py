@@ -71,3 +71,27 @@ async def test_corrupt_report_is_treated_as_missing(client, monkeypatch, tmp_pat
     monkeypatch.setattr("app.api.rageval.REPORT_PATH", path)
     body = (await client.get("/api/rag-eval/overview")).json()
     assert body["present"] is False
+
+
+async def test_hallucination_rate_counts_only_current_round(client, monkeypatch,
+                                                            tmp_path,
+                                                            db_session_factory, db_clean):
+    from app.db import repository
+    for eid, status in [("A1", "已解决"), ("A2", None), ("A3", None)]:
+        row = await repository.upsert_faith_case(
+            eid, "A_policy", "q" + eid, "hybrid_rerank", "a", "r", [], "judge")
+        if status:
+            await repository.set_faith_case_status(row["id"], status, "修好了")
+    data = _report()
+    data["meta"]["eval_count"] = 300
+    data["generation"]["faithfulness"]["hybrid_rerank"]["cases"] = [
+        {"id": "A1", "bucket": "A_policy", "query": "qA1", "answer": "a",
+         "reason": "r", "citations": []}]
+    path = tmp_path / "rag_eval.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setattr("app.api.rageval.REPORT_PATH", path)
+    body = (await client.get("/api/rag-eval/overview")).json()
+    hall = body["hallucination"]
+    assert hall["judged"] == 1 and hall["confirmed"] == 1
+    assert hall["judged_rate"] == 0.0033 and hall["confirmed_rate"] == 0.0033
+    assert hall["ledger_total"] == 3

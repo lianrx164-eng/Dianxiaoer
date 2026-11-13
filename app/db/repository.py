@@ -5,6 +5,7 @@ from sqlalchemy import func, select, text
 import app.db.base as db          # 用模块属性引用,便于测试 monkeypatch async_session
 from app.db.models import (
     Conversation,
+    FaithCase,
     Faq,
     KnowledgeChunk,
     LowConfidenceQuestion,
@@ -272,3 +273,115 @@ async def insert_low_confidence(
         await s.commit()
         await s.refresh(row)
         return row.id
+
+
+DISPOSED = ("已解决", "无需解决")
+
+
+async def upsert_faith_case(
+    eval_id: str, bucket: str, query: str, strategy: str, answer: str,
+    reason: str, citations: list | None, judge_model: str | None,
+) -> dict:
+    """一题一行:同题再判只更新答案/理由/角标快照并累加 seen_count;
+    已处置的题又被判出 → 退回未解决(复发),清空处置说明。"""
+    async with db.async_session() as s:
+        row = (await s.execute(
+            select(FaithCase).where(FaithCase.eval_id == eval_id)
+        )).scalar_one_or_none()
+        recurrence = False
+        if row is None:
+            row = FaithCase(
+                eval_id=eval_id, bucket=bucket, query=query, strategy=strategy,
+                answer=answer, reason=reason, citations=citations,
+                judge_model=judge_model,
+            )
+            s.add(row)
+        else:
+            recurrence = row.status in DISPOSED
+            row.bucket, row.query, row.strategy = bucket, query, strategy
+            row.answer, row.reason = answer, reason
+            row.citations, row.judge_model = citations, judge_model
+            row.seen_count += 1
+            row.last_seen_at = datetime.now()
+            if recurrence:
+                row.status = "未解决"
+                row.resolution = None
+        await s.commit()
+        await s.refresh(row)
+        return {"id": row.id, "eval_id": row.eval_id, "status": row.status,
+                "seen_count": row.seen_count, "recurrence": recurrence}
+
+
+def _faith_case(row: FaithCase) -> dict:
+    return {
+        "id": row.id, "eval_id": row.eval_id, "bucket": row.bucket,
+        "query": row.query, "strategy": row.strategy, "answer": row.answer,
+        "reason": row.reason, "citations": row.citations,
+        "judge_model": row.judge_model, "status": row.status,
+        "seen_count": row.seen_count,
+        "first_seen_at": row.first_seen_at.isoformat() if row.first_seen_at else None,
+        "last_seen_at": row.last_seen_at.isoformat() if row.last_seen_at else None,
+        "resolution": row.resolution,
+        "resolved_at": row.resolved_at.isoformat() if row.resolved_at else None,
+    }
+
+
+async def list_faith_cases(status: str | None = None,
+                           page: int = 1, size: int = 20) -> dict:
+    async with db.async_session() as s:
+        counts = {"未解决": 0, "已解决": 0, "无需解决": 0}
+        rows = (await s.execute(
+            select(FaithCase.status, func.count()).group_by(FaithCase.status)
+        )).all()
+        for st, n in rows:
+            counts[st] = int(n)
+        q = select(FaithCase)
+        if status:
+            q = q.where(FaithCase.status == status)
+        total = int((await s.execute(
+            select(func.count()).select_from(q.subquery())
+        )).scalar_one())
+        page = max(1, page)
+        size = max(1, min(size, 100))
+        rows = (await s.execute(
+            q.order_by(FaithCase.status, FaithCase.last_seen_at.desc())
+            .offset((page - 1) * size).limit(size)
+        )).scalars()
+        return {"items": [_faith_case(r) for r in rows], "counts": counts,
+                "total": total, "page": page, "size": size}
+
+
+async def set_faith_case_status(case_id: int, status: str,
+                                resolution: str | None) -> dict | None:
+    if status not in ("未解决", "已解决", "无需解决"):
+        raise ValueError("status 不合法")
+    text_res = (resolution or "").strip()
+    if status in DISPOSED and not text_res:
+        raise ValueError("标已解决/无需解决时必须写一句处置说明")
+    async with db.async_session() as s:
+        row = await s.get(FaithCase, case_id)
+        if row is None:
+            return None
+        row.status = status
+        if status == "未解决":
+            row.resolution = None
+            row.resolved_at = None
+        else:
+            row.resolution = text_res
+            row.resolved_at = datetime.now()
+        await s.commit()
+        await s.refresh(row)
+        return _faith_case(row)
+
+
+async def faith_case_status_map() -> dict[str, str]:
+    async with db.async_session() as s:
+        rows = (await s.execute(select(FaithCase.eval_id, FaithCase.status))).all()
+        return {eval_id: status for eval_id, status in rows}
+
+
+async def faith_case_count() -> int:
+    async with db.async_session() as s:
+        return int((await s.execute(
+            select(func.count()).select_from(FaithCase)
+        )).scalar_one())

@@ -25,6 +25,7 @@ from app.core.llm import get_chat_model
 from app.core.prompts import (
     ANSWER_COVERAGE_PROMPT, FAITHFULNESS_PROMPT, RAG_ANSWER_PROMPT,
 )
+from app.db import repository
 from app.kb import milvus_client
 
 STRATEGIES = ["vector", "bm25", "hybrid", "hybrid_rerank"]
@@ -240,6 +241,13 @@ async def _generation(samples: list[dict], hits_map: dict, strategies: list[str]
     answer_cov = {st: {**{b: _mean(v) for b, v in coverage[st].items()},
                        "overall": _mean([x for v in coverage[st].values() for x in v])}
                   for st in coverage}
+    for c in cases:
+        try:
+            await repository.upsert_faith_case(
+                c["id"], c["bucket"], c["query"], "hybrid_rerank",
+                c["answer"], c["reason"], c["citations"], settings.chat_model)
+        except Exception as e:  # noqa: BLE001 - 台账失败不影响本轮报告
+            _log(f"[台账写入失败] {c['id']}: {type(e).__name__}: {str(e)[:100]}")
     faith_out = {"hybrid_rerank": {
         **{b: _mean(v) for b, v in faith["hybrid_rerank"].items()},
         "overall": _mean([x for v in faith["hybrid_rerank"].values() for x in v]),

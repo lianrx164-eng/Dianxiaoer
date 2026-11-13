@@ -306,6 +306,131 @@
     container.append(panel);
   }
 
+  async function renderFaithCases(container) {
+    const panel = el('div', { class: 'panel' });
+    panel.append(el('div', { class: 'panel-head' }, [
+      el('span', { class: 'num', text: '5' }),
+      el('h2', { text: '编造个案台账' }),
+      el('span', { class: 'hint', id: 'faithHint', text: '跨轮累计 · 处置后留痕' }),
+    ]));
+    const body = el('div', { class: 'panel-body' });
+    panel.append(body);
+    container.append(panel);
+
+    let status = '未解决';
+    let page = 1;
+    async function load() {
+      body.innerHTML = '';
+      let data;
+      try {
+        data = await AC.getJSON('/api/rag-eval/faith-cases?status=' +
+          encodeURIComponent(status) + '&page=' + page + '&size=10');
+      } catch (e) {
+        body.append(el('div', { class: 'empty-state', text: '台账读取失败:' + (e.message || e) }));
+        return;
+      }
+      const hall = window.__rag ? window.__rag.hallucination : null;
+      const hint = document.getElementById('faithHint');
+      if (hint && hall) {
+        hint.textContent = `本轮判出 ${pct(hall.judged_rate)} · 人工确认 ${pct(hall.confirmed_rate)} · 台账累计 ${AC.fmt(hall.ledger_total)} 条`;
+      }
+      const tabs = el('div', { class: 'tabs' });
+      [['未解决', data.counts['未解决']], ['已解决', data.counts['已解决']],
+       ['无需解决', data.counts['无需解决']], ['', data.total]].forEach(function (t) {
+        const b = el('button', { type: 'button', text: (t[0] || '全部') + ' ' + t[1] });
+        if (t[0] === status) b.className = 'on';
+        b.addEventListener('click', function () { status = t[0]; page = 1; load(); });
+        tabs.append(b);
+      });
+      body.append(tabs);
+
+      if (!data.items.length) {
+        body.append(el('div', { class: 'empty-state', text: '这一栏暂时没有个案。' }));
+      }
+      data.items.forEach(function (c) {
+        const card = el('div', { class: 'case' });
+        const cited = new Set((String(c.answer || '').match(/\[(\d+)\]/g) || [])
+          .map(x => x.replace(/[\[\]]/g, '')));
+        card.append(el('div', { class: 'odd',
+          text: `${c.eval_id} · ${c.query}\n状态 ${c.status} · 被判 ${c.seen_count} 次 · ${c.last_seen_at || ''}` }));
+        card.append(el('div', { class: 'odd', text: '回答:\n' + (c.answer || '') }));
+        card.append(el('div', { class: 'odd', text: '裁判理由:' + (c.reason || '') }));
+        if (c.resolution) card.append(el('div', { class: 'odd', text: '处置说明:' + c.resolution }));
+        const cites = el('details');
+        cites.append(el('summary', { text: `这一轮喂给模型的 Top-K 证据全集(${c.citations ? c.citations.length : 0} 条)` }));
+        const ul = el('ul', { class: 'cite-list' });
+        (c.citations || []).forEach(function (cit) {
+          ul.append(el('li', {
+            text: `[${cit.n}] ${cited.has(String(cit.n)) ? '✓ 已引用 ' : ''}${cit.section_path} · ` +
+              `${cit.question} — ${String(cit.answer || '').slice(0, 80)}`,
+          }));
+        });
+        cites.append(ul);
+        card.append(cites);
+
+        const editor = el('div', { class: 'btnrow' });
+        editor.style.display = 'none';
+        const input = el('input', { type: 'text', placeholder: '写一句处置说明(必填)' });
+        input.style.maxWidth = '360px';
+        const submit = el('button', { class: 'btn primary', type: 'button', text: '提交' });
+        const cancel = el('button', { class: 'btn', type: 'button', text: '取消' });
+        let pending = '已解决';
+        async function send() {
+          if (!input.value.trim()) { alert('处置说明必填'); return; }
+          try {
+            await AC.getJSON('/api/rag-eval/faith-cases/' + c.id + '/status', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ status: pending, resolution: input.value.trim() }),
+            });
+            load();
+          } catch (e) { alert('提交失败:' + (e.message || e)); }
+        }
+        submit.addEventListener('click', send);
+        cancel.addEventListener('click', function () { editor.style.display = 'none'; });
+        editor.append(input, submit, cancel);
+        card.append(editor);
+
+        const actions = el('div', { class: 'btnrow' });
+        function dispose(st) {
+          pending = st;
+          editor.style.display = 'flex';
+          input.value = '';
+          input.focus();
+        }
+        const b1 = el('button', { class: 'btn', type: 'button', text: '已解决' });
+        b1.addEventListener('click', function () { dispose('已解决'); });
+        const b2 = el('button', { class: 'btn', type: 'button', text: '无需解决' });
+        b2.addEventListener('click', function () { dispose('无需解决'); });
+        const b3 = el('button', { class: 'btn', type: 'button', text: '退回未解决' });
+        b3.addEventListener('click', async function () {
+          try {
+            await AC.getJSON('/api/rag-eval/faith-cases/' + c.id + '/status', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ status: '未解决' }),
+            });
+            load();
+          } catch (e) { alert('提交失败:' + (e.message || e)); }
+        });
+        actions.append(b1, b2, b3);
+        card.append(actions);
+        body.append(card);
+      });
+
+      const pages = Math.max(1, Math.ceil(data.total / data.size));
+      const pager = el('div', { class: 'btnrow' });
+      pager.style.marginTop = '8px';
+      const prev = el('button', { class: 'btn', type: 'button', text: '上一页' });
+      const next = el('button', { class: 'btn', type: 'button', text: '下一页' });
+      prev.disabled = page <= 1;
+      next.disabled = page >= pages;
+      prev.addEventListener('click', function () { page -= 1; load(); });
+      next.addEventListener('click', function () { page += 1; load(); });
+      pager.append(prev, el('span', { class: 'muted', text: `第 ${page} / ${pages} 页` }), next);
+      body.append(pager);
+    }
+    await load();
+  }
+
   function render() {
     const content = document.getElementById('content');
     content.innerHTML = '';
@@ -319,11 +444,13 @@
     renderTable(content);
     renderGeneration(content);
     renderCases(content);
+    renderFaithCases(content);
   }
 
   async function refresh() {
     try {
       data = await AC.getJSON('/api/rag-eval/overview');
+      window.__rag = data;
       render();
     } catch (e) {
       document.getElementById('content').innerHTML =
