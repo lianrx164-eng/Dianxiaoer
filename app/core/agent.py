@@ -18,6 +18,15 @@ class ConversationNotFound(Exception):
     pass
 
 
+# 收敛步不 bind_tools,但 DeepSeek 想发起第二轮工具调用时会把调用当特殊标记
+# 文本(<｜｜DSML｜｜…>)直接吐给用户;用一条系统指令收口,保证单轮且答复体面
+CONVERGENCE_GUARD = SystemMessage(
+    "以上工具已执行完毕(只允许一轮工具调用)。请直接基于以上工具结果用中文回答;"
+    "结果为空或与问题不匹配时,如实说明未找到相关信息并给出建议(如转人工),"
+    "不要再调用任何工具。"
+)
+
+
 @dataclass
 class AgentResult:
     conversation_id: int
@@ -85,7 +94,7 @@ async def run_agent_turn(user_id, message, conversation_id, model=None) -> Agent
     if not ai.tool_calls:
         return AgentResult(conversation_id, _text(ai), [], [])
     final: AIMessage = await model.ainvoke(         # 收敛:不 bind_tools
-        [*messages, ai, *(r.tool_message for r in runs)])
+        [*messages, ai, *(r.tool_message for r in runs), CONVERGENCE_GUARD])
     await repository.append_message(conversation_id, "assistant", content=_text(final))
     return AgentResult(conversation_id, _text(final), ai.tool_calls, runs)
 
@@ -108,7 +117,9 @@ async def stream_agent_turn(
         yield {"type": "tool", "name": tc.get("name") or ""}
 
     chunks: list[str] = []
-    async for chunk in model.astream([*messages, ai, *(r.tool_message for r in runs)]):
+    async for chunk in model.astream(
+        [*messages, ai, *(r.tool_message for r in runs), CONVERGENCE_GUARD]
+    ):
         text = chunk.content if isinstance(chunk.content, str) else _text(chunk)
         if not text:
             continue

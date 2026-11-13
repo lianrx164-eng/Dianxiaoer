@@ -77,3 +77,13 @@ async def test_stream_unknown_conversation_raises(db_session_factory, db_clean):
         assert False, "应抛 ConversationNotFound"
     except agent.ConversationNotFound:
         pass
+
+
+async def test_stream_convergence_carries_single_round_guard(db_session_factory, db_clean):
+    first = AIMessage(content="", tool_calls=[
+        {"name": "query_faq", "args": {"keyword": "邮费"}, "id": "c1"}])
+    model = FakeModel([first], stream_tokens=["未找到相关信息。"])
+    await _collect(agent.stream_agent_turn("u1", "邮费是多少", None, model=model))
+    converged = model.astream_messages[0]
+    assert "不要再" in converged[-1].content
+    assert converged[-1].type == "system"

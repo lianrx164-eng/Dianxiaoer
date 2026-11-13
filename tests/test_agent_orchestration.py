@@ -72,3 +72,15 @@ async def test_unknown_conversation_raises(db_session_factory, db_clean):
         assert False, "应抛 ConversationNotFound"
     except agent.ConversationNotFound:
         pass
+
+
+async def test_convergence_call_carries_single_round_guard(db_session_factory, db_clean):
+    first = AIMessage(content="", tool_calls=[
+        {"name": "query_faq", "args": {"keyword": "邮费"}, "id": "c1"}])
+    model = FakeModel([first, AIMessage(content="未找到相关信息,建议联系人工。")])
+    await agent.run_agent_turn("u1", "邮费是多少", None, model=model)
+    converged = model.invoke_messages[1]
+    # 收敛调用必须带「不要再调用工具」的收口指令:
+    # DeepSeek 在无 tools 的收敛步想再调工具时,会把调用当特殊标记文本吐出来
+    assert "不要再" in converged[-1].content
+    assert converged[-1].type == "system"
