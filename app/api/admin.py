@@ -28,6 +28,7 @@ async def _dualwrite_card() -> dict:
         pending = await repository.count_chunks_by_status("pending")
     except Exception:
         return _card("dualwrite", "双写一致性", "/kb", "读数失败", "MySQL 读不到", {})
+    client = None
     try:
         client = milvus_client.get_client()
         milvus_client.ensure_collection(client)
@@ -35,6 +36,9 @@ async def _dualwrite_card() -> dict:
     except Exception:
         return _card("dualwrite", "双写一致性", "/kb", "读数失败", "Milvus 读不到",
                      {"done": done, "pending": pending})
+    finally:
+        if client is not None:
+            client.close()
     total = done + pending
     ok = total == n
     conclusion = "知识块数与 Milvus 条数一致" if ok else (
