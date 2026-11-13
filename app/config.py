@@ -23,5 +23,13 @@ class Settings(BaseSettings):
     retrieval_top_k: int = 3
     retrieval_min_score: float = 0.4
 
+    # 重排:百炼原生 rerank(qwen3-rerank),与嵌入同一账号,key 缺省复用
+    rerank_url: str = "https://maas.qianwenaiapi.com/api/v1/services/rerank/text-rerank/text-rerank"
+    rerank_api_key: str | None = None
+    rerank_model: str = "qwen3-rerank"
+    recall_top_k: int = 50
+    rerank_top_k: int = 10
+    rerank_min_score: float = 0.3
+
 
 settings = Settings()

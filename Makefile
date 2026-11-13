@@ -1,4 +1,4 @@
-.PHONY: dev test eval seed eval-agent kb-preview kb-build kb-vectorize kb-mine kb-reset eval-retrieval seed-conv eval-mining
+.PHONY: dev test eval seed eval-agent kb-preview kb-build kb-vectorize kb-mine kb-reset eval-retrieval seed-conv eval-mining smoke-rag eval-rag eval-check
 
 dev:
 	./scripts/dev.sh
@@ -43,3 +43,14 @@ seed-conv:
 
 eval-mining:
 	PYTHONPATH=. uv run python scripts/eval_mining.py
+
+# ch04 fail-fast:Milvus Lite BM25 + 百炼 rerank
+smoke-rag:
+	PYTHONPATH=. uv run python scripts/smoke_milvus_bm25.py
+	PYTHONPATH=. uv run python scripts/smoke_rerank.py
+
+eval-rag:
+	PYTHONPATH=. uv run python scripts/eval_ch04.py
+
+eval-check:
+	PYTHONPATH=. uv run python scripts/validate_eval_ch04.py
