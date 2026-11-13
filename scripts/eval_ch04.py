@@ -69,16 +69,20 @@ def _log(line: str = "") -> None:
 def _load(limit: int = 0) -> list[dict]:
     samples = [json.loads(l) for l in EVAL_SET.read_text(encoding="utf-8").splitlines()
                if l.strip()]
+    samples = [s for s in samples if s["bucket"] != D_BUCKET]
     if limit:
         kept, seen = [], defaultdict(int)
         for s in samples:
-            if s["bucket"] == D_BUCKET:
-                continue
             if seen[s["bucket"]] < limit:
                 kept.append(s)
                 seen[s["bucket"]] += 1
         samples = kept
     return samples
+
+
+def _load_absent() -> list[dict]:
+    return [json.loads(l) for l in EVAL_SET.read_text(encoding="utf-8").splitlines()
+            if l.strip() and json.loads(l)["bucket"] == D_BUCKET]
 
 
 def _mean(values) -> float | None:
@@ -194,7 +198,8 @@ async def _retrieve_all(samples: list[dict], strategies: list[str], client) -> d
     return dict(pairs)
 
 
-async def _generation(samples: list[dict], hits_map: dict, strategies: list[str]) -> dict | None:
+async def _generation(samples: list[dict], d_samples: list[dict],
+                      hits_map: dict, strategies: list[str]) -> dict | None:
     sem = asyncio.Semaphore(GEN_CONCURRENCY)
 
     async def one(sample: dict, strategy: str):
@@ -256,7 +261,7 @@ async def _generation(samples: list[dict], hits_map: dict, strategies: list[str]
         "cases": cases,
     }} if faith["hybrid_rerank"] else {}
     return {"answer_coverage": answer_cov, "faithfulness": faith_out,
-            "refusal": await _refusal(samples, hits_map), "errors": list(_ERRORS)}
+            "refusal": await _refusal(d_samples, hits_map), "errors": list(_ERRORS)}
 
 
 async def _refusal(samples: list[dict], hits_map: dict) -> dict:
@@ -307,10 +312,9 @@ async def main() -> None:
 
     started = time.time()
     samples = _load(args.limit)
-    d_samples = []
-    if not args.limit:
-        d_samples = [json.loads(l) for l in EVAL_SET.read_text(encoding="utf-8").splitlines()
-                     if l.strip() and json.loads(l)["bucket"] == D_BUCKET]
+    d_samples = _load_absent()
+    if args.limit:
+        d_samples = d_samples[:args.limit]
     all_samples = samples + d_samples
 
     client = milvus_client.get_client()
@@ -359,7 +363,7 @@ async def main() -> None:
     generation_d = None
     if not args.no_generation:
         try:
-            generation_d = await _generation(samples, hits_map, strategies)
+            generation_d = await _generation(samples, d_samples, hits_map, strategies)
             if generation_d:
                 ac = generation_d["answer_coverage"]
                 for st in strategies:

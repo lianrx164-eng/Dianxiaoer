@@ -538,7 +538,7 @@
     const html = renderMarkdown(src);
     if (!items || !items.length) return html;
     const byN = new Map(items.map(c => [String(c.n), c]));
-    return html.replace(/\[(\d{1,2})\]/g, (m, n) =>
+    return html.replace(/[\[【](\d{1,2})[\]】]/g, (m, n) =>
       byN.has(n) ? '<sup class="cite" data-n="' + n + '">[' + n + ']</sup>' : m);
   }
 

@@ -50,7 +50,7 @@ smoke-rag:
 	PYTHONPATH=. uv run python scripts/smoke_rerank.py
 
 eval-rag:
-	PYTHONPATH=. uv run python scripts/eval_ch04.py
+	PYTHONPATH=. uv run python -u scripts/eval_ch04.py
 
 eval-check:
 	PYTHONPATH=. uv run python scripts/validate_eval_ch04.py
