@@ -175,9 +175,12 @@ async def reset() -> dict:
     """清库重建:drop Milvus 集合 + TRUNCATE knowledge_chunks。
     Milvus Lite 单进程独占数据目录,所以清库必须在本进程内做,不能走 make 子进程。"""
     try:
-        with milvus_client.session() as client:
-            if client.has_collection(milvus_client.COLLECTION):
-                client.drop_collection(milvus_client.COLLECTION)
+        # 清库不能用 session():它会先 ensure_collection,旧 schema 会被拦下
+        client = milvus_client.get_client()
+        try:
+            milvus_client.drop(client, milvus_client.COLLECTION)
+        finally:
+            milvus_client.close_client(client)
         await repository.truncate_knowledge_chunks()
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"清库失败:{exc}") from exc

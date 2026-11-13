@@ -151,6 +151,7 @@ PY
     make kb-build           # data/kb/*.md → knowledge_chunks(pending)
     make kb-vectorize       # 嵌入 + BM25 text → Milvus
     make eval-check         # 评估集自检:题数/去重/章节可命中/要点逐字在库
+    make eval-rewrite       # Query 改写标注样例(5/5 通过)
     make eval-rag           # 四策略 × 五桶评估:检索 + 证据覆盖度 + 生成,落 data/ch04/reports/
     make judge-check        # 拿台账里已处置个案重放裁判,不一致退出码 1
 

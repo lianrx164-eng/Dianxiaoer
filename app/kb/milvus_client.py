@@ -25,19 +25,24 @@ def get_client(uri: str | None = None) -> MilvusClient:
     return _CLIENT
 
 
+def close_client(client: MilvusClient) -> None:
+    """关闭客户端;若关的是进程内单例,清掉缓存,下次 get_client 重连。"""
+    global _CLIENT
+    client.close()
+    if client is _CLIENT:
+        _CLIENT = None
+        _ensured.clear()
+
+
 @contextmanager
 def session(uri: str | None = None):
     """一次请求/一段逻辑的客户端生命周期:确保集合存在,退出时关闭。"""
-    global _CLIENT
     client = get_client(uri)
     try:
         ensure_collection(client)
         yield client
     finally:
-        client.close()
-        if client is _CLIENT:
-            _CLIENT = None
-            _ensured.clear()
+        close_client(client)
 
 
 def _schema_compatible(client: MilvusClient, collection: str) -> bool:
