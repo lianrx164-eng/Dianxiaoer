@@ -385,3 +385,14 @@ async def faith_case_count() -> int:
         return int((await s.execute(
             select(func.count()).select_from(FaithCase)
         )).scalar_one())
+
+
+async def list_disposed_faith_cases() -> list[FaithCase]:
+    """已处置且带证据快照的个案:judge-check 的回归集。"""
+    async with db.async_session() as s:
+        rows = (await s.execute(
+            select(FaithCase)
+            .where(FaithCase.status.in_(DISPOSED), FaithCase.citations.isnot(None))
+            .order_by(FaithCase.id)
+        )).scalars()
+        return list(rows)
