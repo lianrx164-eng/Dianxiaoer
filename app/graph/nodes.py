@@ -1,6 +1,8 @@
 import logging
+import re
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langgraph.types import interrupt
 
 from app.config import settings
 from app.core import coref as coref_mod
@@ -17,6 +19,7 @@ from app.core.prompts import (
 from app.db import repository
 from app.graph.routing import INTENT_TO_ROUTE
 from app.graph.state import trace_of
+from app.tools import business
 from app.tools.infra import execute_tool_call
 from app.tools.registry import get_all_tools
 
@@ -112,6 +115,28 @@ async def classify_intent(state) -> dict:
     return {"intent": intent, "intent_confidence": conf, "route": route,
             "trace": trace_of(state, intent=intent,
                               intent_confidence=conf, route=route)}
+
+
+_ORDER_RE = re.compile(r"(?<!\d)(\d{4,})(?!\d)")
+
+
+def _extract_order_id(text: str) -> str | None:
+    """抽 4+ 位连续数字当订单号。中文与数字之间没有 \\b 边界,故用前后非数字断言。"""
+    m = _ORDER_RE.search(text or "")
+    return m.group(1) if m else None
+
+
+async def fetch_order(state) -> dict:
+    """退款子流程第一步:抽订单号;缺则 interrupt 弹订单选择器等前端点选(resume 回填);
+    拿到后 order_snapshot 取订单数据。interrupt 之前只做只读(resume 时本节点从头重跑)。"""
+    oid = state.get("order_id") or _extract_order_id(
+        state.get("resolved_query") or _user_text(state))
+    if not oid:
+        orders = business.list_user_orders(state.get("user_id", ""))
+        oid = interrupt({"type": "select_order", "orders": orders})
+    data = business.order_snapshot(oid)
+    return {"order_id": oid, "order_data": data,
+            "trace": trace_of(state, fetch_order={"order_id": oid})}
 
 
 async def forced_rag(state) -> dict:
