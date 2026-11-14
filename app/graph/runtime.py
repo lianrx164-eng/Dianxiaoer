@@ -160,7 +160,7 @@ def _turn_result(cid: int, final: dict, prev_messages: list) -> dict:
     turn = final.get("messages", [])[len(prev_messages):]
     return {"conversation_id": cid,
             "state": {**final, "turn_messages": turn},
-            "interrupt": _interrupt_payload(final)}
+            "interrupt": _interrupt_payload(final.get("__interrupt__"))}
 
 
 async def run_turn(user_id, message, conversation_id) -> dict:

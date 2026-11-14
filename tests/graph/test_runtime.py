@@ -12,6 +12,17 @@ def _quiet(monkeypatch):
     patch_runtime_repo(monkeypatch, runtime)
 
 
+def test_turn_result_surfaces_interrupt_payload():
+    """__interrupt__ 是 list[Interrupt];_turn_result 必须取 .value,不能直接迭代 state dict。"""
+    from langgraph.types import Interrupt
+
+    final = {"messages": [], "__interrupt__": (Interrupt(value={
+        "type": "confirm_ticket", "preview": {"ticket_type": "售后", "description": "x"}}),)}
+    out = runtime._turn_result(1, final, [])
+    assert out["interrupt"] == {
+        "type": "confirm_ticket", "preview": {"ticket_type": "售后", "description": "x"}}
+
+
 @pytest.mark.asyncio
 async def test_run_turn_creates_conversation_when_none(monkeypatch):
     async def fake_create(uid):
