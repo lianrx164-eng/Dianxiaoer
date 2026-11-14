@@ -22,11 +22,13 @@ _DDL_FILES = [
     pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch04-ddl.sql",
     pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch07-ddl.sql",
     pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch08-ddl.sql",
+    pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch09-ddl.sql",
 ]
 # 删除顺序:先子表后父表;knowledge_chunks 自引用 FK 靠 FOREIGN_KEY_CHECKS=0 兜
 _TABLES = [
     "tool_audit_logs", "conversation_summaries", "faith_cases",
-    "low_confidence_questions", "messages", "tickets", "conversations",
+    "low_confidence_questions", "review_queue", "eval_runs",
+    "messages", "tickets", "conversations",
     "faq", "qa_extraction_staging", "knowledge_chunks",
 ]
 
@@ -61,7 +63,9 @@ async def _test_engine():
     # 跑 DDL 建表(以 ch02-ddl.sql 为权威)
     async with engine.begin() as conn:
         for s in _ddl_statements():
-            await conn.execute(text(s))
+            # DDL 里的 COMMENT 可能含 ":"(如 JSON 示例),text() 会把它当绑定参数;
+            # 表结构语句不需要参数化,直接走驱动层。
+            await conn.exec_driver_sql(s)
     yield engine
     await engine.dispose()
 

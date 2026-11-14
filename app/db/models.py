@@ -127,6 +127,12 @@ class LowConfidenceQuestion(Base):
         Enum("retrieval_low_conf", "self_check", "user_feedback")
     )
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ch09:落池时召回快照(Top 几条原文+得分),没走检索为 NULL
+    retrieved_chunks: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # ch09:查重后归并到的缺口,指向 review_queue.id
+    matched_review_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("review_queue.id"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
@@ -169,4 +175,37 @@ class ToolAuditLog(Base):
     error_message: Mapped[str | None] = mapped_column(String(512), nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, server_default="0")
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class ReviewQueue(Base):
+    """ch09 飞轮待审队列:一行 = 一个去重后的知识缺口;命中只累加次数,不新建行。"""
+
+    __tablename__ = "review_queue"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    normalized_question: Mapped[str] = mapped_column(String(512))
+    ai_suggested_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    occurrence_count: Mapped[int] = mapped_column(Integer, server_default="1")
+    review_status: Mapped[str] = mapped_column(
+        Enum("待审", "通过", "驳回"), server_default="待审"
+    )
+    approved_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class EvalRun(Base):
+    """ch09 评估流水线:一行 = 一轮评估;metrics 收各指标,按时间连成趋势。"""
+
+    __tablename__ = "eval_runs"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    triggered_by: Mapped[str] = mapped_column(
+        Enum("手动", "定时"), server_default="定时"
+    )
+    dataset_size: Mapped[int] = mapped_column(Integer)
+    metrics: Mapped[dict] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
