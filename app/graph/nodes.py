@@ -8,6 +8,7 @@ from app.config import settings
 from app.core import coref as coref_mod
 from app.core import evidence
 from app.core import intent as intent_mod
+from app.core import query_understanding, retrieval
 from app.core.llm import get_chat_model
 from app.core.memory import trim_history
 from app.core.prompts import (
@@ -137,6 +138,37 @@ async def fetch_order(state) -> dict:
     data = business.order_snapshot(oid)
     return {"order_id": oid, "order_data": data,
             "trace": trace_of(state, fetch_order={"order_id": oid})}
+
+
+async def retrieve_policy(state) -> dict:
+    """退款子流程强制检索政策:Query 扩写 3 条 → 多 query 各检索一次 → 按 chunk id 去重合并
+    (保留每 id 最高分)→ 按分降序拼编号证据。产出注入 agent_llm 作「能不能退」的判据
+    (不让模型凭记忆答)。库里知识一份,扩写只在检索侧现查现用。"""
+    base = state.get("resolved_query") or _user_text(state)
+    od = state.get("order_data") or {}
+    seed = f"{base} {od.get('status', '')}".strip()
+    queries = await query_understanding.expand_queries(seed)
+
+    merged: dict = {}                       # chunk id -> 最高分 hit
+    for q in queries:
+        for h in await retrieval.search_knowledge(
+                q, strategy="hybrid_rerank", bm25_query=q):
+            cur = merged.get(h["id"])
+            if cur is None or h["rerank_score"] > cur["rerank_score"]:
+                merged[h["id"]] = h
+    ranked = sorted(merged.values(), key=lambda h: h["rerank_score"], reverse=True)
+    arranged = retrieval.arrange_head_tail(ranked)
+    citations = [
+        {"n": i + 1, "id": h["id"], "chunk_id": h["id"],
+         "section_path": h["section_path"], "question": h["question"],
+         "answer": h["answer"], "content_type": h["content_type"]}
+        for i, h in enumerate(arranged)
+    ]
+    evidence = "\n".join(f"[{c['n']}] {c['question']}: {c['answer']}"
+                         for c in citations)
+    return {"evidence": evidence, "citations": citations,
+            "trace": trace_of(state, retrieve_policy={
+                "queries": queries, "hits": len(ranked)})}
 
 
 async def forced_rag(state) -> dict:
