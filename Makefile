@@ -139,9 +139,9 @@ flywheel:
 flywheel-samples:
 	PYTHONPATH=. uv run python scripts/validate_flywheel_samples.py
 
-# ch09 评估流水线:复用 ch04 评估集,落 eval_runs 连趋势(TRIGGER=手动|定时)
+# ch09 评估流水线:复用 ch04 评估集,落 eval_runs 连趋势(TRIGGER=manual|scheduled)
 eval-flywheel:
-	PYTHONPATH=. uv run python scripts/eval_flywheel.py --triggered-by $(or $(TRIGGER),手动)
+	PYTHONPATH=. uv run python scripts/eval_flywheel.py --triggered-by $(or $(TRIGGER),manual)
 
 # ch09 按意图 token 账(需 Langfuse 在跑;DAYS=窗口天数)
 cost-report:

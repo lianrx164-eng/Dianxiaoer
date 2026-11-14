@@ -125,15 +125,17 @@ def _trend(runs) -> None:
 
 async def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--triggered-by", default="手动", choices=["手动", "定时"])
+    # Windows make 会把非 ASCII 参数按本地码页转坏,命令行只用 ASCII,入库再映射中文
+    ap.add_argument("--triggered-by", default="manual", choices=["manual", "scheduled"])
     args = ap.parse_args()
+    triggered_by = {"manual": "手动", "scheduled": "定时"}[args.triggered_by]
 
-    _log(f"=== ch09 评估流水线(触发:{args.triggered_by})===")
+    _log(f"=== ch09 评估流水线(触发:{triggered_by})===")
     result = await run_once()
     m = result["metrics"]
     _log(f"本轮:Recall@10={m['recall_at_10']:.3f} MRR={m['mrr']:.3f} "
          f"Faithfulness={m['faithfulness']:.3f} 拒答率={m['refusal_rate']:.3f}")
-    await repository.insert_eval_run(args.triggered_by, result["dataset_size"], m)
+    await repository.insert_eval_run(triggered_by, result["dataset_size"], m)
     _trend(await repository.list_eval_runs(limit=10))
     _OUT.parent.mkdir(parents=True, exist_ok=True)
     _OUT.write_text("\n".join(_LINES) + "\n", encoding="utf-8")

@@ -206,6 +206,8 @@ async def test_retrieve_policy_expands_dedups_merges(monkeypatch):
                                        "order_data": {"status": "已签收"}})
     assert [c["id"] for c in out["citations"]] == [1, 2]
     assert "[1]" in out["evidence"] and "[2]" in out["evidence"]
+    assert [s["question"] for s in out["retrieved_snapshot"]] == ["退货", "运费"]
+    assert out["retrieved_snapshot"][0]["rerank_score"] == 0.9
     assert out["trace"]["retrieve_policy"]["hits"] == 2
     assert out["trace"]["retrieve_policy"]["queries"] == [
         "退货政策", "无理由退换货", "退货时限"]

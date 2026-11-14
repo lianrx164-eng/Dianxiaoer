@@ -12,6 +12,7 @@ from app.core import evidence
 from app.core import intent as intent_mod
 from app.core import query_understanding, retrieval
 from app.core.llm import get_chat_model
+from app.core.confidence import snapshot_from_hits
 from app.core.observability import tag_intent
 from app.core.prompts import (
     AGENT_SYSTEM,
@@ -210,6 +211,8 @@ async def retrieve_policy(state) -> dict:
     arranged = retrieval.arrange_head_tail(ranked)
     citations, evidence_text = evidence.build_citations(arranged)
     return {"evidence": evidence_text, "citations": citations,
+            # ch09:退款路也走了检索,快照留给 👎 回捞
+            "retrieved_snapshot": snapshot_from_hits(ranked),
             "trace": trace_of(state, retrieve_policy={
                 "queries": queries, "hits": len(ranked)})}
 
