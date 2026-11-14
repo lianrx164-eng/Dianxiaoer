@@ -27,14 +27,14 @@ def test_budget_with_demo_config():
         max_user_input_tokens=2000, max_agent_steps=3,
         tool_result_max_tokens=1200, rerank_top_k=5))
     assert (b.window, b.fixed, b.react_peak, b.history, b.layer1, b.layer2) == (
-        18000, 8597, 3600, 5803, 4061, 1741)
+        18000, 9037, 3600, 5363, 3753, 1609)
 
 
 def test_only_window_set_yields_small_history_and_self_check_warns(caplog):
     s = _settings(model_context_window=18000)      # 步数/rerank 保持默认 6/10
     b = cb.compute_budget(s)
     assert (b.fixed, b.react_peak, b.history, b.layer1, b.layer2) == (
-        10597, 7200, 203, 141, 61)
+        11037, 7200, 0, 0, 0)
     with caplog.at_level(logging.ERROR, logger="app.core.context_budget"):
         cb.self_check(s)
     assert "上下文预算不足" in caplog.text
@@ -43,23 +43,24 @@ def test_only_window_set_yields_small_history_and_self_check_warns(caplog):
 def test_default_budget():
     b = cb.compute_budget(_settings())
     assert (b.window, b.fixed, b.react_peak, b.history, b.layer1, b.layer2) == (
-        64000, 10597, 7200, 30000, 20999, 9000)
+        64000, 11037, 7200, 30000, 20999, 9000)
 
 
 def test_budget_constants_match_prompt_and_tools():
-    """提示词或工具 schema 变了,这条先红;重测后同步 system/tools 常量。"""
+    """提示词或内置工具 schema 变了,这条先红;MCP 工具 schema 用单独的静态预留。"""
     import json
 
     from langchain_core.utils.function_calling import convert_to_openai_tool
 
     from app.core.prompts import AGENT_SYSTEM
-    from app.tools.registry import get_all_tools
+    from app.tools.registry import builtin_specs
 
     s = _settings()
-    tools_json = json.dumps([convert_to_openai_tool(t) for t in get_all_tools()],
-                            ensure_ascii=False)
+    tools_json = json.dumps(
+        [convert_to_openai_tool(x.tool) for x in builtin_specs()], ensure_ascii=False)
     assert cb.estimate_text_tokens(AGENT_SYSTEM, s) == s.system_prompt_tokens
     assert cb.estimate_text_tokens(tools_json, s) == s.tool_schema_tokens
+    assert s.mcp_tool_schema_tokens > 0           # 三台 MCP 工具的静态预留
 
 
 def test_estimate_messages_tokens_counts_tool_calls():

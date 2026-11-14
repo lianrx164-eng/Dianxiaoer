@@ -24,8 +24,7 @@ from app.db import repository
 from app.graph.routing import INTENT_TO_ROUTE
 from app.graph.state import trace_of
 from app.tools import business
-from app.tools.infra import execute_tool_call
-from app.tools.registry import get_all_tools
+from app.tools import engine, registry
 
 logger = logging.getLogger(__name__)
 
@@ -289,10 +288,10 @@ def _log_model_context(state, msgs) -> None:
         context_budget.estimate_messages_tokens(msgs), " | ".join(desc))
 
 
-def _tools_for(state) -> list:
+def _tools_for(state, specs) -> list:
     """submit_refund 只在退款子流程里可见;其他路不让模型看见退款工具,
     避免误分类时产出没有订单号、没有政策依据的退款表单。"""
-    tools = get_all_tools()
+    tools = [s.tool for s in specs]
     if _in_refund_flow(state):
         return tools
     return [t for t in tools if t.name != "submit_refund"]
@@ -300,7 +299,8 @@ def _tools_for(state) -> list:
 
 async def agent_llm(state, config=None) -> dict:
     """ReAct 推理步:调模型(带工具),累加 steps 与 token 消耗。"""
-    model = get_chat_model(streaming=True).bind_tools(_tools_for(state))
+    specs = await registry.get_all_specs()
+    model = get_chat_model(streaming=True).bind_tools(_tools_for(state, specs))
     msgs = _agent_messages(state)
     _log_model_context(state, msgs)
     ai: AIMessage = await model.ainvoke(msgs, config)
@@ -317,6 +317,8 @@ async def agent_tools(state) -> dict:
     转成前端可选项,并回合成 ToolMessage 让模型收敛(真正写库在按钮端点)。
     模型若重复调 create_ticket,只保留一份可选项。"""
     last = state["messages"][-1]
+    cid = state.get("conversation_id", 0)
+    specs = {s.name: s for s in await registry.get_all_specs()}
     tool_msgs = []
     actions = list(state.get("suggested_actions") or [])
     seen = {(a["type"], str(a.get("draft"))) for a in actions}
@@ -354,7 +356,7 @@ async def agent_tools(state) -> dict:
                          "也不要再调用任何工具。"),
                 tool_call_id=tc["id"], name="submit_refund"))
         else:
-            run = await execute_tool_call(tc, state.get("conversation_id", 0))
+            run = await engine.execute_tool_call(tc, cid, specs)
             tool_msgs.append(run.tool_message)
     out = {"messages": tool_msgs}
     if actions:

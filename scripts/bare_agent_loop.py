@@ -8,12 +8,12 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.core.llm import get_chat_model
 from app.core.prompts import AGENT_SYSTEM
-from app.tools.infra import execute_tool_call
-from app.tools.registry import get_all_tools
+from app.tools import engine, registry
 
 
 async def run_agent(query: str, max_turns: int = 6):
-    model = get_chat_model().bind_tools(get_all_tools())
+    specs = {s.name: s for s in await registry.get_all_specs()}
+    model = get_chat_model().bind_tools([s.tool for s in specs.values()])
     messages = [SystemMessage(AGENT_SYSTEM), HumanMessage(query)]
     for step in range(1, max_turns + 1):
         ai = await model.ainvoke(messages)
@@ -23,7 +23,7 @@ async def run_agent(query: str, max_turns: int = 6):
             return ai.content
         for tc in ai.tool_calls:
             print(f"[第{step}步] 调用工具 {tc['name']} args={tc['args']}")
-            run = await execute_tool_call(tc, conversation_id=0)
+            run = await engine.execute_tool_call(tc, conversation_id=0, specs=specs)
             messages.append(run.tool_message)
     print(f"[封顶] max_turns={max_turns} 用尽仍未收敛,生产环境此处应走兜底话术")
     return "(未收敛)"

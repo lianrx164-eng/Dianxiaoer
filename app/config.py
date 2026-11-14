@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     chars_per_token: float = 2.0
     system_prompt_tokens: int = 389       # AGENT_SYSTEM 777 字 @ 2.0
     tool_schema_tokens: int = 928         # 5 个内置工具 schema 1856 字 @ 2.0
+    mcp_tool_schema_tokens: int = 440     # 3 个 MCP 工具 schema 预留(2026-11-14 实测)
     system_overhead_tokens: int = 30
     evidence_chunk_tokens: int = 400
     summary_budget_tokens: int = 750

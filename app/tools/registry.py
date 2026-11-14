@@ -90,16 +90,15 @@ def get_builtin_spec(name: str) -> ToolSpec | None:
     return _BUILTIN.get(name)
 
 
-# ---- 过渡兼容(旧 infra.py / nodes.py 仍在用;Task 5 删除)----
-NO_RETRY: set[str] = {"create_ticket", "query_faq", "submit_refund"}
-INJECT_CONVERSATION: set[str] = {"create_ticket"}
-TOOL_TIMEOUTS: dict[str, float] = {"query_faq": 45.0}
+async def get_all_specs() -> list[ToolSpec]:
+    """内置 + MCP 现拉合并;重名 builtin 优先、后到丢弃告警(本章无重名:内置 query_logistics 已下线)。"""
+    from app.tools import mcp_client   # 延迟导入避免环
 
-
-def get_all_tools() -> list[BaseTool]:
-    return [s.tool for s in builtin_specs()]
-
-
-def get_tool(name: str) -> BaseTool | None:
-    spec = get_builtin_spec(name)
-    return spec.tool if spec else None
+    merged: dict[str, ToolSpec] = {s.name: s for s in builtin_specs()}
+    for s in await mcp_client.fetch_mcp_specs():
+        if s.name in merged:
+            logger.warning("MCP 工具与已注册工具重名,丢弃 name=%s server=%s",
+                           s.name, s.mcp_server)
+            continue
+        merged[s.name] = s
+    return list(merged.values())

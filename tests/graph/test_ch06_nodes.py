@@ -250,8 +250,11 @@ def test_agent_messages_knowledge_path_still_injects_evidence():
 
 
 def test_tools_for_hides_submit_refund_outside_refund_flow():
-    business_names = {t.name for t in nodes._tools_for({"route": "business"})}
-    refund_names = {t.name for t in nodes._tools_for({"route": "refund_flow"})}
+    from app.tools import registry
+
+    specs = registry.builtin_specs()
+    business_names = {t.name for t in nodes._tools_for({"route": "business"}, specs)}
+    refund_names = {t.name for t in nodes._tools_for({"route": "refund_flow"}, specs)}
     assert "submit_refund" not in business_names
     assert "submit_refund" in refund_names
 

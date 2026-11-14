@@ -3,7 +3,8 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 import pytest
 
 from app.graph import nodes
-from app.tools.infra import ToolRun
+from app.tools import registry
+from app.tools.engine import ToolRun
 
 
 def test_agent_messages_injects_evidence_on_knowledge():
@@ -43,6 +44,9 @@ async def test_agent_llm_accumulates_steps_and_tokens(monkeypatch):
             return ai
 
     monkeypatch.setattr(nodes, "get_chat_model", lambda **k: FakeModel())
+    async def fake_specs():
+        return registry.builtin_specs()
+    monkeypatch.setattr(nodes.registry, "get_all_specs", fake_specs)
     out = await nodes.agent_llm({"messages": [HumanMessage("hi")], "steps": 1, "tokens_used": 100})
     assert out["steps"] == 2
     assert out["tokens_used"] == 115
@@ -52,12 +56,17 @@ async def test_agent_llm_accumulates_steps_and_tokens(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_agent_tools_executes_normal_tool(monkeypatch):
-    async def fake_exec(tc, cid):
+    async def fake_exec(tc, cid, specs):
         return ToolRun(tool_call_id=tc["id"], name=tc["name"], ok=True,
                        tool_message=ToolMessage(content='{"status":"已发货"}',
-                                                tool_call_id=tc["id"], name=tc["name"]))
+                                                tool_call_id=tc["id"], name=tc["name"]),
+                       status="成功")
 
-    monkeypatch.setattr(nodes, "execute_tool_call", fake_exec)
+    async def fake_specs():
+        return registry.builtin_specs()
+
+    monkeypatch.setattr(nodes.engine, "execute_tool_call", fake_exec)
+    monkeypatch.setattr(nodes.registry, "get_all_specs", fake_specs)
     ai = AIMessage("", tool_calls=[{"name": "query_logistics",
                                     "args": {"tracking_no": "SF1"}, "id": "t1"}])
     out = await nodes.agent_tools({"messages": [ai], "conversation_id": 5})
@@ -67,10 +76,14 @@ async def test_agent_tools_executes_normal_tool(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_agent_tools_dedupes_repeated_create_ticket(monkeypatch):
-    async def fake_exec(tc, cid):
+    async def fake_exec(tc, cid, specs):
         raise AssertionError("create_ticket 不应被执行")
 
-    monkeypatch.setattr(nodes, "execute_tool_call", fake_exec)
+    async def fake_specs():
+        return registry.builtin_specs()
+
+    monkeypatch.setattr(nodes.engine, "execute_tool_call", fake_exec)
+    monkeypatch.setattr(nodes.registry, "get_all_specs", fake_specs)
     ai = AIMessage("", tool_calls=[
         {"name": "create_ticket", "args": {"description": "屏幕碎了", "ticket_type": "售后"}, "id": "t1"},
         {"name": "create_ticket", "args": {"description": "屏幕碎了", "ticket_type": "售后"}, "id": "t2"},
@@ -82,10 +95,14 @@ async def test_agent_tools_dedupes_repeated_create_ticket(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_agent_tools_intercepts_create_ticket(monkeypatch):
-    async def fake_exec(tc, cid):
+    async def fake_exec(tc, cid, specs):
         raise AssertionError("create_ticket 不应被执行(应拦截为提议)")
 
-    monkeypatch.setattr(nodes, "execute_tool_call", fake_exec)
+    async def fake_specs():
+        return registry.builtin_specs()
+
+    monkeypatch.setattr(nodes.engine, "execute_tool_call", fake_exec)
+    monkeypatch.setattr(nodes.registry, "get_all_specs", fake_specs)
     ai = AIMessage("", tool_calls=[{"name": "create_ticket",
                                     "args": {"description": "屏幕碎了", "ticket_type": "售后"},
                                     "id": "t9"}])

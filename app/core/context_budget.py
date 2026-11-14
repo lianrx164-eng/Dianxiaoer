@@ -78,7 +78,8 @@ class ContextBudget:
 def compute_budget(s: Settings = settings) -> ContextBudget:
     """按 spec §7.1 公式算预算;layer1+layer2 比 history 少 1,是边界余量。"""
     fixed = (
-        s.system_prompt_tokens + s.tool_schema_tokens + s.system_overhead_tokens
+        s.system_prompt_tokens + s.tool_schema_tokens + s.mcp_tool_schema_tokens
+        + s.system_overhead_tokens
         + s.max_output_tokens + s.max_user_input_tokens
         + s.rerank_top_k * s.evidence_chunk_tokens
         + s.summary_budget_tokens + s.safety_margin_tokens
