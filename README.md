@@ -193,7 +193,7 @@ checkpointer 的 sqlite 文件由 `AsyncSqliteSaver.setup()` 自建,已在 `.git
 ### 命令
 
     make smoke-graph        # fail-fast:StateGraph + AsyncSqliteSaver + 多模式流式形状
-    make eval-intent        # 七类意图标注评估(14 条样例)
+    make eval-intent        # 意图标注评估(现为 8 类 16 条,见 ch06)
     make eval-ch05          # 五验收端到端(需服务在跑;BASE_URL 改端口)
     uv run python -m scripts.bare_agent_loop "订单1001的物流到哪了"   # 祛魅:裸 Agent 循环
 
@@ -212,3 +212,48 @@ checkpointer 的 sqlite 文件由 `AsyncSqliteSaver.setup()` 自建,已在 `.git
 ### 测试
 
     uv run pytest -q   # 需 MySQL;图单测用 InMemorySaver,不写 data/ch05_checkpoints.sqlite
+
+
+---
+
+## Ch06:意图识别与对话管理(分流器正式版)
+
+把 ch05 的分流器做实:`coref`(指代消解 + Query 改写)→ 八类意图 + confidence → 五出口。退款退货/售后走确定性子流程:缺订单号用 LangGraph `interrupt` 弹订单选择器,`Command(resume)` 回填;`retrieve_policy` 用 Query 扩写(严格 3 条)多查去重合并强制检索政策;主力 Agent 只判「这一单能不能退」,能退调 `submit_refund` 被拦成前端退款表单。闲聊/其他零模型固定话术;投诉仍不进 Agent。
+
+### 配置(可选,默认值如下)
+
+    INTENT_MODEL=                 # 意图识别模型;空=回落 CHAT_MODEL(先求准)
+    INTENT_SMALL_MODEL=           # 降级路小模型(仅种子,本章未接运行时)
+    INTENT_MODE=accuracy          # accuracy=只用大模型
+    INTENT_CONF_THRESHOLD=0.6     # cost 模式升级阈值(仅种子)
+
+### 数据迁移
+
+存量库执行一次(tests 用的建表 DDL 已同步):
+
+    uv run python scripts/seed_db.py sql/ch06-ticket-type.sql
+
+### 命令
+
+    make smoke-interrupt    # interrupt/Command(resume)/astream 中断 surface
+    make eval-intent        # 八类 + 「其他」+ 多轮漂移 + JSON 稳定
+    make eval-coref         # 指代补全 + 已完整透传
+    make eval-expand        # 核心场景严格 3 条扩写
+    make eval-ch06          # 四验收端到端(需服务在跑;BASE_URL 改端口)
+
+### 页面
+
+- 退款类问题不带订单号:聊天流里出现订单卡片;点选后自动续跑,判定结果下出现「提交退款工单」按钮。
+- 退款表单:订单号只读 + 原因固定下拉(七天无理由/质量问题/发错货/不想要了/其他),提交后写 `tickets`(`ticket_type='退款'`)并显示单号。
+
+### 验收映射
+
+1. **多轮漂移**:「订单1001的物流到哪了」→「那它能退吗」→「算了,它现在到哪了」,`trace.route` 依次 `business → refund_flow → business`,`trace.resolved_query` 每轮补全。
+2. **JSON 稳定/其他兜底**:`make eval-intent`;怪问题「帮我写一首关于宇宙的诗」→ `intent=其他`、`route=fallback_script`、固定话术。
+3. **退款子流程**:「订单2002这个能退吗」→ `trace.route=refund_flow`、`trace.retrieve_policy` 有 3 条 query 与命中数、回答给出判定。
+4. **订单选择器**:新会话「我要退款」→ `interrupt` 返回订单;点选 → `/api/actions/resume` 续流出判定与退款按钮 → 表单提交写库(`dev-notes/ch06-acceptance4-*.jpg`)。
+
+### 测试
+
+    uv run pytest -q   # 需 MySQL;interrupt 单测用最小图 + InMemorySaver
+
