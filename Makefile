@@ -1,4 +1,4 @@
-.PHONY: dev test eval seed eval-agent kb-preview kb-build kb-vectorize kb-mine kb-reset eval-retrieval seed-conv eval-mining smoke-rag eval-rag eval-check judge-check eval-rewrite smoke-graph eval-intent eval-ch05 smoke-interrupt eval-coref eval-expand eval-ch06 eval-ch07 smoke-ch07 smoke-ch07-demo mcp-up mcp-down langfuse-up langfuse-down calibrate-confidence flywheel flywheel-samples eval-flywheel cost-report
+.PHONY: dev test eval seed eval-agent kb-preview kb-build kb-vectorize kb-mine kb-reset eval-retrieval seed-conv eval-mining smoke-rag eval-rag eval-check judge-check eval-rewrite smoke-graph eval-intent eval-ch05 smoke-interrupt eval-coref eval-expand eval-ch06 eval-ch07 smoke-ch07 smoke-ch07-demo mcp-up mcp-down langfuse-up langfuse-down calibrate-confidence flywheel flywheel-samples eval-flywheel cost-report eval-ch09
 
 dev:
 	./scripts/dev.sh
@@ -149,3 +149,7 @@ eval-flywheel:
 # ch09 按意图 token 账(需 Langfuse 在跑;DAYS=窗口天数)
 cost-report:
 	PYTHONPATH=. uv run python scripts/cost_by_intent.py --days $(or $(DAYS),7)
+
+# ch09 验收 2/3/4 端到端(需 make dev 在跑;BASE_URL 改端口)
+eval-ch09:
+	PYTHONPATH=. uv run python -m scripts.eval_ch09 --base-url $(or $(BASE_URL),http://127.0.0.1:8002)
