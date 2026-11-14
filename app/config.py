@@ -67,11 +67,10 @@ class Settings(BaseSettings):
     tool_max_retries: int = 2
     demo_ticket_delay_seconds: float = 0.0
 
-    # ch09 可观测(Langfuse 自部署;三者齐全才挂回调,缺省时系统照常跑、测试环境不依赖)
-    # 环境变量名与 SDK v3 一致:LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY / LANGFUSE_BASE_URL
-    langfuse_public_key: str = ""
-    langfuse_secret_key: str = ""
-    langfuse_base_url: str = ""     # 如 http://localhost:3000(自部署地址,数据不出门)
+    # ch09 可观测(Phoenix 本地自部署;PHOENIX_ENDPOINT 为空则完全不启用)
+    phoenix_endpoint: str = ""      # 如 http://localhost:6006/v1/traces
+    phoenix_base_url: str = "http://localhost:6006"
+    phoenix_project: str = "mewhelp"
 
     # ch09 置信度闸(正式版):阈值由 make calibrate-confidence 在 ch04 评估集上校准后回填
     # 2026-11-14 校准:推荐 0.59(Youden J=0.859,D 桶 9 条因上游报错未计入)

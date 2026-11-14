@@ -8,6 +8,8 @@
 
 **Tech Stack:** Langfuse v3 自部署(独立 docker compose)、`langfuse>=3.12,<4`(`langfuse.langchain.CallbackHandler`)、LangGraph、SQLAlchemy 2 async、FastAPI、复用 ch03 dualwrite / ch04 评估集 / ch05 证据管线 / ch08 工具系统。
 
+> **2026-11-14 修订(用户拍板)**:本机 Docker/WSL2 不可用,观测层改为 **Arize Phoenix**(本地 `phoenix serve`,SQLite,无 Docker,数据不出门),见 spec §15。Task 2 的部署物/配置/回调、Task 3 的 trace 标注、Task 11 的查询实现均已按 Phoenix 落地;Task 12/13 页面与其余任务不变。验收 1/5/7 的入口由 Langfuse :3000 改为 Phoenix :6006。
+
 **Spec:** `docs/superpowers/specs/2026-11-14-ch09-observability-flywheel-design.md`(§14 是仓库基线校正,与本计划冲突时以 spec §14 + 本计划为准)。
 
 ## Global Constraints

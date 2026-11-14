@@ -297,3 +297,19 @@ approve 时:以 `normalized_question` + `approved_answer` 构造一条 QA 知识
 | MySQL 走 docker exec | 本机 MySQL 8.0 本地安装,开发库 `mewhelp_ch02` | DDL 用 `mysql.exe` 应用,不依赖容器 |
 
 Langfuse 环境变量名按 SDK v3 文档为 `LANGFUSE_HOST`(SDK 3.15 同时接受 `LANGFUSE_BASE_URL`);仓库 settings 字段名沿用 `langfuse_base_url`(语义等价),构造时显式传 `base_url=`(`host` 在 3.15 已是废弃别名)。
+
+## 15. 观测层修订:Phoenix 替代 Langfuse(2026-11-14,用户拍板)
+
+**决定**:本机没有可用的 Docker 运行环境(WSL2 需重启启用,装完 Docker Desktop 引擎仍无法启动)。用户明确要求改用 **Arize Phoenix** 作为平替,并把为 Langfuse 下载的 Docker Desktop 删除。技术选型变更由用户拍板,本节取代 §3 与 §4 中 Langfuse 的实现细节。
+
+**为什么不破坏其余设计**:Phoenix 同样是本地自部署、数据不出门;飞轮、置信度闸、审核、评估、页面全部不动。
+
+**新形态**
+- 服务:`make phoenix-up` → `phoenix serve`,UI `http://localhost:6006`,数据落 `data/phoenix/phoenix.db`(SQLite),不需要 Docker。
+- 配置(`app/config.py`):`phoenix_endpoint`(空=完全不启用)、`phoenix_base_url`、`phoenix_project`。不再有密钥。
+- 插桩:`app/core/observability.py` 启动时 `phoenix.otel.register(...)` + OpenInference `LangChainInstrumentor` 一次;LangGraph 全部节点、LLM、工具、检索自动成 span。
+- 会话归属:`runtime` 的每轮调用包在 `turn_span(cid)` 里,内部 `using_session(session_id=...)`,Phoenix 把同会话多轮串成一组。
+- 意图标注:`classify_intent` 调 `tag_intent`,把 `intent` / `intent.confidence` 写到本轮根 span;成本表按根 span 的 intent 归组。
+- 成本账:`scripts/cost_by_intent.py` 改用 `phoenix.client.Client.spans.get_spans_dataframe`,按 trace 根 span 的 intent 把 LLM span 的 token 汇总。
+- 验收口径替换:验收 1 = `localhost:6006` 点开任意请求看完整链路树;验收 5 = `make cost-report` 与 `/observability` 成本块;验收 7 = `/observability` 三块可看、可重跑。
+- 清理:`docker-compose.langfuse.yml` 删除,Docker Desktop 卸载;WSL2 作为 Windows 系统特性保留(卸载需重启且可能影响其他工具,未擅自移除)。

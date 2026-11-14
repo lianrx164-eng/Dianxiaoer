@@ -8,7 +8,7 @@ from langgraph.types import Command
 
 from app.config import settings
 from app.core import context_budget, memory, summarizer
-from app.core.observability import attach_observability, flush as flush_observability
+from app.core.observability import attach_observability, flush as flush_observability, turn_span
 from app.db import repository
 from app.graph.build import build_graph
 
@@ -172,10 +172,18 @@ def _turn_result(cid: int, final: dict, prev_messages: list) -> dict:
 
 
 def _trace_config(cid: int) -> dict:
-    """运行配置:Langfuse 靠 metadata 里的 session id 把同会话多轮串成一组;
-    未启用观测时这段 metadata 对 LangGraph 无副作用。"""
-    return {"configurable": {"thread_id": str(cid)},
-            "metadata": {"langfuse_session_id": str(cid)}}
+    """LangGraph 运行配置;Phoenix 的 session 归属由 turn_span 的 using_session 负责。"""
+    return {"configurable": {"thread_id": str(cid)}}
+
+
+def _mark_intent(span, state: dict) -> None:
+    """turn_span 结束时把意图补写到根 span(Phoenix trace 级过滤用)。"""
+    if span is None:
+        return
+    intent = state.get("intent")
+    if intent:
+        span.set_attribute("intent", intent)
+        span.set_attribute("intent.confidence", float(state.get("intent_confidence", 0.0)))
 
 
 async def run_turn(user_id, message, conversation_id) -> dict:
@@ -196,8 +204,10 @@ async def run_turn(user_id, message, conversation_id) -> dict:
                 "interrupt": pending}
     prev_messages = (prev.values or {}).get("messages", []) if prev else []
     ctx = await _load_context(cid)
-    final = await graph.ainvoke(
-        _graph_input(user_id, message, cid, prev_messages, ctx), config)
+    async with turn_span(cid) as span:
+        final = await graph.ainvoke(
+            _graph_input(user_id, message, cid, prev_messages, ctx), config)
+        _mark_intent(span, final)
     await summarizer.maybe_schedule_summary(cid)
     return _turn_result(cid, final, prev_messages)
 
@@ -207,32 +217,40 @@ async def _stream_events(cid: int, stream_source) -> AsyncIterator[dict]:
     config = _trace_config(cid)
     actions: list = []
     seen_actions: set = set()
-    async for mode, chunk in get_graph().astream(
-            stream_source, config, stream_mode=["messages", "updates"]):
-        if mode == "messages":
-            msg, meta = chunk
-            if meta.get("langgraph_node") in ANSWER_NODES:
-                text = msg.content if isinstance(msg.content, str) else ""
-                if text:
-                    yield {"type": "delta", "text": text}
-        elif mode == "updates":
-            payload = _interrupt_payload(chunk.get("__interrupt__"))
-            if payload is not None:
-                yield _interrupt_event(cid, payload)
-                return                  # 图已暂停,前端点选后走 /resume 续流
-            for node, upd in chunk.items():
-                if not isinstance(upd, dict):
-                    continue
-                if node in DETERMINISTIC_ANSWER_NODES and upd.get("answer"):
-                    yield {"type": "delta", "text": upd["answer"]}
-                if node in CITATION_NODES and upd.get("citations"):
-                    yield {"type": "citations", "items": upd["citations"]}
-                if node == "agent_tools":
-                    for m in upd.get("messages", []):
-                        name = getattr(m, "name", None)
-                        if name and name not in ACTION_TOOLS:
-                            yield {"type": "tool", "name": name}
-                _merge_actions(actions, seen_actions, upd.get("suggested_actions"))
+    intent_state: dict = {}
+    async with turn_span(cid) as span:
+        try:
+            async for mode, chunk in get_graph().astream(
+                    stream_source, config, stream_mode=["messages", "updates"]):
+                if mode == "messages":
+                    msg, meta = chunk
+                    if meta.get("langgraph_node") in ANSWER_NODES:
+                        text = msg.content if isinstance(msg.content, str) else ""
+                        if text:
+                            yield {"type": "delta", "text": text}
+                elif mode == "updates":
+                    payload = _interrupt_payload(chunk.get("__interrupt__"))
+                    if payload is not None:
+                        yield _interrupt_event(cid, payload)
+                        return              # 图已暂停,前端点选后走 /resume 续流
+                    for node, upd in chunk.items():
+                        if not isinstance(upd, dict):
+                            continue
+                        if node == "classify_intent" and upd.get("intent"):
+                            intent_state["intent"] = upd["intent"]
+                            intent_state["intent_confidence"] = upd.get("intent_confidence", 0.0)
+                        if node in DETERMINISTIC_ANSWER_NODES and upd.get("answer"):
+                            yield {"type": "delta", "text": upd["answer"]}
+                        if node in CITATION_NODES and upd.get("citations"):
+                            yield {"type": "citations", "items": upd["citations"]}
+                        if node == "agent_tools":
+                            for m in upd.get("messages", []):
+                                name = getattr(m, "name", None)
+                                if name and name not in ACTION_TOOLS:
+                                    yield {"type": "tool", "name": name}
+                        _merge_actions(actions, seen_actions, upd.get("suggested_actions"))
+        finally:
+            _mark_intent(span, intent_state)
     if actions:
         yield {"type": "actions", "items": actions}
     yield {"type": "done", "conversation_id": cid}
@@ -274,7 +292,9 @@ async def resume_turn(conversation_id: int, resume_value) -> dict:
     graph = get_graph()
     prev = await graph.aget_state(config)
     prev_messages = (prev.values or {}).get("messages", []) if prev else []
-    final = await graph.ainvoke(Command(resume=resume_value), config)
+    async with turn_span(conversation_id) as span:
+        final = await graph.ainvoke(Command(resume=resume_value), config)
+        _mark_intent(span, final)
     await summarizer.maybe_schedule_summary(conversation_id)
     return _turn_result(conversation_id, final, prev_messages)
 

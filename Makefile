@@ -1,4 +1,4 @@
-.PHONY: dev test eval seed eval-agent kb-preview kb-build kb-vectorize kb-mine kb-reset eval-retrieval seed-conv eval-mining smoke-rag eval-rag eval-check judge-check eval-rewrite smoke-graph eval-intent eval-ch05 smoke-interrupt eval-coref eval-expand eval-ch06 eval-ch07 smoke-ch07 smoke-ch07-demo mcp-up mcp-down langfuse-up langfuse-down calibrate-confidence flywheel flywheel-samples eval-flywheel cost-report eval-ch09
+.PHONY: dev test eval seed eval-agent kb-preview kb-build kb-vectorize kb-mine kb-reset eval-retrieval seed-conv eval-mining smoke-rag eval-rag eval-check judge-check eval-rewrite smoke-graph eval-intent eval-ch05 smoke-interrupt eval-coref eval-expand eval-ch06 eval-ch07 smoke-ch07 smoke-ch07-demo mcp-up mcp-down phoenix-up phoenix-down calibrate-confidence flywheel flywheel-samples eval-flywheel cost-report eval-ch09
 
 dev:
 	./scripts/dev.sh
@@ -115,20 +115,17 @@ mcp-down:
 	-@kill `cat data/mcp-aftersales.pid 2>/dev/null` 2>/dev/null; rm -f data/mcp-aftersales.pid
 	@echo "MCP Servers 已停"
 
-# ch09: Langfuse 自部署观测栈(web:3000 + worker + postgres + clickhouse + redis + minio)
-# DOCKER 可覆盖:刚装好的 Windows 本机 PATH 可能还没刷新
-DOCKER ?= docker
+# ch09: Phoenix 本地观测服务(SQLite 存储,不需要 Docker)
+PHOENIX_WORKING_DIR ?= data/phoenix
 
-langfuse-up:
-	$(DOCKER) compose -f docker-compose.langfuse.yml up -d
-	@echo "Langfuse 起中: http://localhost:3000 (admin@mewhelp.local / mewhelp123)"
-	@echo "首次就绪约 2-3 分钟;key 已 headless 预置,.env 需有:"
-	@echo "  LANGFUSE_PUBLIC_KEY=pk-lf-mewhelp-local"
-	@echo "  LANGFUSE_SECRET_KEY=sk-lf-mewhelp-local"
-	@echo "  LANGFUSE_BASE_URL=http://localhost:3000"
+phoenix-up:
+	@mkdir -p log $(PHOENIX_WORKING_DIR)
+	@nohup env PHOENIX_WORKING_DIR=$(PHOENIX_WORKING_DIR) uv run phoenix serve > log/phoenix.log 2>&1 & echo $$! > data/phoenix.pid
+	@sleep 2 && echo "Phoenix 起中: http://localhost:6006 (数据 $(PHOENIX_WORKING_DIR)/phoenix.db)"
 
-langfuse-down:
-	$(DOCKER) compose -f docker-compose.langfuse.yml down
+phoenix-down:
+	-@kill `cat data/phoenix.pid 2>/dev/null` 2>/dev/null; rm -f data/phoenix.pid
+	@echo "Phoenix 已停"
 
 # ch09 置信度阈值校准(需 Milvus + 上游可用 + 知识库已建;跑前先停 dev 释放 Milvus Lite)
 calibrate-confidence:
@@ -146,7 +143,7 @@ flywheel-samples:
 eval-flywheel:
 	PYTHONPATH=. uv run python scripts/eval_flywheel.py --triggered-by $(or $(TRIGGER),manual)
 
-# ch09 按意图 token 账(需 Langfuse 在跑;DAYS=窗口天数)
+# ch09 按意图 token 账(需 Phoenix 在跑;DAYS=窗口天数)
 cost-report:
 	PYTHONPATH=. uv run python scripts/cost_by_intent.py --days $(or $(DAYS),7)
 

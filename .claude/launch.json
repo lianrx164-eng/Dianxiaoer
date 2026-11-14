@@ -6,6 +6,11 @@
       "runtimeExecutable": "uv",
       "runtimeArgs": ["run", "uvicorn", "app.main:app", "--port", "8002", "--reload"],
       "port": 8002
+    },
+    {
+      "name": "phoenix",
+      "url": "http://localhost:6006",
+      "port": 6006
     }
   ]
 }

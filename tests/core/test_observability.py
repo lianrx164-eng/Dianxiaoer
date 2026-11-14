@@ -1,63 +1,82 @@
-"""ch09 观测挂载:缺配置不挂回调、不碰 langfuse;齐配置才 with_config。"""
+"""ch09 观测挂载:Phoenix 未配置时零副作用;启用时插桩一次并写 trace 属性。"""
 from app.core import observability
 
 
-def test_disabled_when_keys_missing(monkeypatch):
-    monkeypatch.setattr("app.config.settings.langfuse_public_key", "")
-    monkeypatch.setattr("app.config.settings.langfuse_secret_key", "sk")
-    monkeypatch.setattr("app.config.settings.langfuse_base_url", "http://x")
-    assert observability.langfuse_enabled() is False
+def test_disabled_when_endpoint_missing(monkeypatch):
+    monkeypatch.setattr("app.config.settings.phoenix_endpoint", "")
+    assert observability.phoenix_enabled() is False
 
 
 def test_attach_returns_graph_unchanged_when_disabled(monkeypatch):
-    monkeypatch.setattr("app.config.settings.langfuse_public_key", "")
+    monkeypatch.setattr("app.config.settings.phoenix_endpoint", "")
     sentinel = object()
     assert observability.attach_observability(sentinel) is sentinel
 
 
 def test_tag_intent_noop_when_disabled(monkeypatch):
-    monkeypatch.setattr("app.config.settings.langfuse_public_key", "")
-    observability.tag_intent("商品咨询", 0.9)   # 不许抛异常、不许要求服务在跑
-
-
-def test_get_langfuse_none_when_disabled(monkeypatch):
-    monkeypatch.setattr("app.config.settings.langfuse_public_key", "")
-    assert observability.get_langfuse() is None
+    monkeypatch.setattr(observability, "_enabled_impl", False)
+    observability.tag_intent("商品咨询", 0.9)   # 不抛即可,不需要 Phoenix 在跑
 
 
 def test_flush_noop_when_disabled(monkeypatch):
-    monkeypatch.setattr(observability, "_client", None)
-    observability.flush()   # 不抛即可
+    monkeypatch.setattr(observability, "_tracer_provider", None)
+    observability.flush()
 
 
-def test_attach_wraps_with_callbacks_when_enabled(monkeypatch):
-    monkeypatch.setattr("app.config.settings.langfuse_public_key", "pk")
-    monkeypatch.setattr("app.config.settings.langfuse_secret_key", "sk")
-    monkeypatch.setattr("app.config.settings.langfuse_base_url", "http://localhost:3000")
+def test_attach_instruments_once_and_returns_graph(monkeypatch):
+    monkeypatch.setattr("app.config.settings.phoenix_endpoint", "http://localhost:6006/v1/traces")
+    monkeypatch.setattr(observability, "_enabled_impl", False)
+    calls = []
 
-    calls = {}
+    def fake_instrument():
+        calls.append(1)
+        observability._enabled_impl = True
 
-    class FakeGraph:
-        def with_config(self, cfg):
-            calls["cfg"] = cfg
-            return "wrapped"
+    monkeypatch.setattr(observability, "_instrument", fake_instrument)
+    graph = object()
+    assert observability.attach_observability(graph) is graph
+    assert observability.attach_observability(graph) is graph
+    assert calls == [1]                       # 只挂一次
 
-    monkeypatch.setattr(observability, "_init_client", lambda: object())
-    monkeypatch.setattr(observability, "_make_handler", lambda: "HANDLER")
-    assert observability.attach_observability(FakeGraph()) == "wrapped"
-    assert calls["cfg"] == {"callbacks": ["HANDLER"]}
+
+def test_tag_intent_sets_root_span_attributes(monkeypatch):
+    class Span:
+        attrs = {}
+
+        def is_recording(self):
+            return True
+
+        def set_attribute(self, k, v):
+            self.attrs[k] = v
+
+    span = Span()
+    monkeypatch.setattr(observability, "_enabled_impl", True)
+    monkeypatch.setattr(observability, "_root_span", type("CV", (), {"get": staticmethod(lambda: span)})())
+    observability.tag_intent("物流", 0.8)
+    assert span.attrs == {"intent": "物流", "intent.confidence": 0.8}
 
 
 def test_tag_intent_failure_is_swallowed(monkeypatch):
-    monkeypatch.setattr("app.config.settings.langfuse_public_key", "pk")
-    monkeypatch.setattr("app.config.settings.langfuse_secret_key", "sk")
-    monkeypatch.setattr("app.config.settings.langfuse_base_url", "http://localhost:3000")
+    class BadSpan:
+        def is_recording(self):
+            raise RuntimeError("Phoenix 挂了")
 
-    def boom(**kw):
-        raise RuntimeError("langfuse 挂了")
+    monkeypatch.setattr(observability, "_enabled_impl", True)
+    monkeypatch.setattr(observability, "_root_span",
+                        type("CV", (), {"get": staticmethod(lambda: BadSpan())})())
+    observability.tag_intent("物流", 0.8)       # 观测失败不许影响业务流
 
-    class FakeClient:
-        update_current_trace = staticmethod(boom)
 
-    monkeypatch.setattr(observability, "_init_client", lambda: FakeClient())
-    observability.tag_intent("物流", 0.8)   # 观测失败不许影响业务流
+def test_flush_calls_provider_and_swallows(monkeypatch):
+    class BadProvider:
+        def force_flush(self):
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(observability, "_tracer_provider", BadProvider())
+    observability.flush()                        # 不抛即可
+
+
+async def test_turn_span_disabled_yields_none(monkeypatch):
+    monkeypatch.setattr(observability, "_enabled_impl", False)
+    async with observability.turn_span(7) as span:
+        assert span is None

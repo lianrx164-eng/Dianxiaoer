@@ -11,7 +11,7 @@ def get_chat_model(
 ) -> ChatOpenAI:
     """直连聊天上游。地址、模型名、密钥全从 .env 来,换上游不动这里。
     model 显式覆盖模型名(意图识别可配更大模型求准),None 时回落 settings.chat_model。
-    ch09:stream_usage=True 让流式调用也回传 token usage(Langfuse 按意图统计不漏账)。"""
+    ch09:stream_usage=True 让流式调用也回传 token usage(Phoenix 按意图统计不漏账)。"""
     return ChatOpenAI(
         model=model or settings.chat_model,
         base_url=settings.chat_base_url,

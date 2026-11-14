@@ -15,3 +15,5 @@ log/
 # ch04 评估报告(运行时产物,页面读同一份)
 data/ch04/reports/
 data/ch04/rewrites.json
+# ch09 Phoenix 本地 trace 库(SQLite,运行时产物)
+data/phoenix/
