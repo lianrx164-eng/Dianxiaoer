@@ -18,12 +18,13 @@ class ProductInput(BaseModel):
 
 
 class LogisticsInput(BaseModel):
-    order_id: str = Field(description="订单号,用于查询该订单的物流轨迹")
+    tracking_no: str = Field(
+        description="物流单号(如 SF1234567890),只能通过 query_order 查询订单后从返回的 tracking_no 字段获得")
 
 
 @tool(args_schema=OrderInput)
 async def query_order(order_id: str) -> dict:
-    """查询订单的状态、金额、下单时间和商品名。用于用户询问某个订单情况时。"""
+    """查询订单的状态、金额、下单时间、商品名和物流单号。用于用户询问某个订单情况时。"""
     rng = random.Random(f"order:{order_id}")
     return {
         "order_id": order_id,
@@ -31,6 +32,7 @@ async def query_order(order_id: str) -> dict:
         "amount": rng.randint(50, 2000),
         "created_at": f"2026-07-{rng.randint(1, 12):02d} 10:00",
         "product": rng.choice(["智能猫砂盆", "猫粮 5kg", "猫爬架", "自动饮水机"]),
+        "tracking_no": f"SF{rng.randint(10**9, 10**10 - 1)}",
     }
 
 
@@ -47,13 +49,14 @@ async def query_product(product_name: str) -> dict:
 
 
 @tool(args_schema=LogisticsInput)
-async def query_logistics(order_id: str) -> dict:
-    """查询订单的物流状态、当前位置和轨迹。用于用户询问物流/快递到哪了时。"""
-    rng = random.Random(f"logistics:{order_id}")
+async def query_logistics(tracking_no: str) -> dict:
+    """查询物流状态、当前位置和轨迹。用于用户询问物流/快递到哪了时。
+    入参是物流单号,需要先用 query_order 查到订单的 tracking_no。"""
+    rng = random.Random(f"logistics:{tracking_no}")
     status = rng.choice(["已揽件", "运输中", "派送中", "已签收"])
     city = rng.choice(["深圳", "广州", "杭州", "上海", "成都"])
     return {
-        "order_id": order_id,
+        "tracking_no": tracking_no,
         "status": status,
         "location": f"{city}分拨中心",
         "timeline": [f"{city}分拨中心 已发出", f"当前状态:{status}"],
