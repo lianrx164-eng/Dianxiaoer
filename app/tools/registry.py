@@ -73,21 +73,16 @@ def scan_builtin() -> None:
     global _scanned
     if _scanned:
         return
-    _scanned = True
     from app.tools import builtin as pkg
     for m in pkgutil.iter_modules(pkg.__path__):
         importlib.import_module(f"{pkg.__name__}.{m.name}")
+    _scanned = True
     logger.info("内置工具注册完成:%s", sorted(_BUILTIN))
 
 
 def builtin_specs() -> list[ToolSpec]:
     scan_builtin()
     return list(_BUILTIN.values())
-
-
-def get_builtin_spec(name: str) -> ToolSpec | None:
-    scan_builtin()
-    return _BUILTIN.get(name)
 
 
 async def get_all_specs() -> list[ToolSpec]:

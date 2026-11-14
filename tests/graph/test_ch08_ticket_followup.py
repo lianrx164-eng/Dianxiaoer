@@ -46,6 +46,19 @@ async def test_sticky_flag_cleared_after_one_turn(monkeypatch):
     assert out["ticket_followup"] is False
 
 
+def test_followup_hint_only_on_user_turn():
+    human = {"trace": {"ticket_followup": True},
+             "messages": [HumanMessage("猫砂盆漏电")]}
+    assert "建单进行中" in nodes._turn_context(human)
+
+    # resume 时最后一条是 AIMessage(带 tool_calls),不能再提示建单
+    ai = {"trace": {"ticket_followup": True},
+          "messages": [AIMessage("", tool_calls=[
+              {"name": "create_ticket", "args": {"description": "x",
+                                                 "ticket_type": "售后"}, "id": "t1"}])]}
+    assert "建单进行中" not in nodes._turn_context(ai)
+
+
 class _FollowupModel:
     """第 1 轮发缺 description 的 create_ticket;追问后第 3 次调用发完整建单。"""
 

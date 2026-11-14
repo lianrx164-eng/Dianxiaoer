@@ -19,7 +19,7 @@ ANSWER_NODES = {"agent_llm"}
 DETERMINISTIC_ANSWER_NODES = {"script_reply", "complaint_reply", "fallback_reply", "cap_reply"}
 # 产出 citations 的节点(知识路预检索 / 退款路政策检索)
 CITATION_NODES = {"forced_rag", "retrieve_policy"}
-# 被 agent_tools 拦截成前端动作、不该出工具徽章的工具
+# 不显示工具徽章:create_ticket 走确认流(结果在 resume 后),submit_refund 转前端退款表单
 ACTION_TOOLS = {"create_ticket", "submit_refund"}
 
 _graph = None
@@ -136,6 +136,13 @@ def _interrupt_payload(interrupts) -> dict | None:
 
 def _pending_payload(snapshot) -> dict | None:
     return _interrupt_payload(getattr(snapshot, "interrupts", ())) if snapshot else None
+
+
+async def pending_interrupt(conversation_id: int) -> dict | None:
+    """当前会话未决中断的完整载荷;无则 None。resume 入口用它校验载荷类型。"""
+    snapshot = await get_graph().aget_state(
+        {"configurable": {"thread_id": str(conversation_id)}})
+    return _pending_payload(snapshot)
 
 
 def _interrupt_event(cid: int, payload: dict) -> dict:

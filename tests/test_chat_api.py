@@ -126,3 +126,19 @@ async def test_chat_maps_interrupt_frame(monkeypatch):
         "event": "interrupt", "conversation_id": 5,
         "kind": "select_order", "orders": [{"order_id": "1001"}]}]
     assert sse["done"] is None           # 图暂停,没有 done 事件([DONE] 只是流终止)
+
+
+async def test_chat_maps_confirm_ticket_preview_frame(monkeypatch):
+    async def fake_stream(*a, **k):
+        yield {"type": "interrupt", "conversation_id": 5,
+               "kind": "confirm_ticket",
+               "preview": {"ticket_type": "售后", "description": "猫砂盆漏电"}}
+
+    monkeypatch.setattr(runtime, "stream_turn", fake_stream)
+    status, text = await _post_chat({"user_id": "u1", "message": "帮我建个工单"})
+    sse = parse_sse(text)
+    assert status == 200
+    assert sse["interrupts"] == [{
+        "event": "interrupt", "conversation_id": 5, "kind": "confirm_ticket",
+        "preview": {"ticket_type": "售后", "description": "猫砂盆漏电"}}]
+    assert sse["done"] is None

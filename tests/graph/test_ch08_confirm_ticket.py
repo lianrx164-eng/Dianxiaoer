@@ -127,3 +127,27 @@ async def test_missing_description_asks_instead_of_interrupt(wired, monkeypatch)
     assert "__interrupt__" not in st
     assert created == []
     assert any(a["status"] == "校验拦下" for a in audits)
+
+
+async def test_first_invalid_second_valid_interrupts_second(wired, monkeypatch):
+    created, audits = wired
+
+    class TwoCallModel(FakeModel):
+        async def ainvoke(self, msgs, config=None):
+            self.calls += 1
+            if self.calls == 1:
+                return AIMessage(content="", tool_calls=[
+                    {"name": "create_ticket", "id": "bad",
+                     "args": {"ticket_type": "咨询"}},
+                    {"name": "create_ticket", "id": "good",
+                     "args": {"description": "猫砂盆漏电", "ticket_type": "售后"}},
+                ])
+            return AIMessage(content="请确认工单信息")
+
+    monkeypatch.setattr(nodes, "get_chat_model", lambda **kw: TwoCallModel())
+    g = build_graph(checkpointer=InMemorySaver())
+    cfg = {"configurable": {"thread_id": "t5"}}
+    st = await g.ainvoke(_input("帮我建个工单,猫砂盆漏电"), cfg)
+    intr = st["__interrupt__"][0].value
+    assert intr["type"] == "confirm_ticket"
+    assert intr["preview"]["description"] == "猫砂盆漏电"

@@ -284,7 +284,10 @@ def _turn_context(state) -> str:
     if state.get("summary"):
         parts.append("\n\n## 早前对话摘要(更早轮次已压缩,其中事实可信)\n"
                      + state["summary"])
-    if (state.get("trace") or {}).get("ticket_followup"):
+    if ((state.get("trace") or {}).get("ticket_followup")
+            and state.get("messages")
+            and isinstance(state["messages"][-1], HumanMessage)):
+        # 只在用户补充信息的那一轮注入;resume 后最后一条是 AIMessage,不能再提示建单
         parts.append(_TICKET_FOLLOWUP_HINT)
     if state.get("evidence"):
         parts.append(_KNOWLEDGE_EVIDENCE_HINT + state["evidence"])
@@ -340,10 +343,14 @@ async def agent_tools(state) -> dict:
 
     ticket_calls = [tc for tc in last.tool_calls if tc["name"] == "create_ticket"]
     tspec = specs.get("create_ticket")
+    ticket_call = None
+    if tspec is not None:
+        ticket_call = next(
+            (tc for tc in ticket_calls
+             if engine.validate_args(tspec, dict(tc.get("args") or {})) is None), None)
     decision = None
-    if (ticket_calls and tspec is not None
-            and engine.validate_args(tspec, dict(ticket_calls[0].get("args") or {})) is None):
-        args = ticket_calls[0].get("args") or {}
+    if ticket_call is not None:
+        args = ticket_call.get("args") or {}
         decision = interrupt({"type": "confirm_ticket",
                               "preview": {"ticket_type": args.get("ticket_type", "咨询"),
                                           "description": args.get("description", "")}})
@@ -374,7 +381,7 @@ async def agent_tools(state) -> dict:
                          "也不要再调用任何工具。"),
                 tool_call_id=tc["id"], name="submit_refund"))
         elif tc["name"] == "create_ticket":
-            if decision is not None and tc is ticket_calls[0]:
+            if decision is not None and tc is ticket_call:
                 if decision.get("confirmed"):
                     run = await engine.execute_tool_call(tc, cid, specs, confirmed=True)
                 else:

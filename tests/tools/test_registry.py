@@ -23,7 +23,7 @@ def test_permissions_only_trust_our_side():
 
 
 def test_create_ticket_schema_excludes_injected_conversation_id():
-    spec = registry.get_builtin_spec("create_ticket")
+    spec = {s.name: s for s in registry.builtin_specs()}["create_ticket"]
     assert spec.inject_conversation is True
     assert "conversation_id" not in spec.json_schema.get("properties", {})
 
@@ -36,5 +36,5 @@ def test_duplicate_register_is_dropped_with_warning(caplog):
         tool=spec.tool, permission="read", source="builtin")
     with caplog.at_level(logging.WARNING, logger="app.tools.registry"):
         registry.register(dup)
-    assert registry.get_builtin_spec(spec.name).description != "dup"
+    assert {s.name: s for s in registry.builtin_specs()}[spec.name].description != "dup"
     assert any("重名" in r.message for r in caplog.records)

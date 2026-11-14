@@ -18,9 +18,9 @@ ch02–ch07 的工具层是「几个写死的内置工具」:`registry.py` 是�
 
 **非目标:** Skill 机制;仓储等更多外部系统;MCP Server 侧鉴权;注册表落库/跨进程注册中心;工具清单缓存与失效策略(本章刻意现问现拿);工具调用成本统计(归 ch09)。
 
-**技术栈(定死):** MCP Server 用 MCP 官方 Python SDK 的 Streamable HTTP 传输;MCP Client 用 `langchain-mcp-adapters` 的 `MultiServerMCPClient`。已用 Context7 核对实装口径:
+**技术栈(定死):** MCP Server 用 MCP 官方 Python SDK 的 Streamable HTTP 传输;MCP Client 用 `langchain-mcp-adapters` 的 `MultiServerMCPClient`。实装口径(`adapters 0.3.2` 要求 `mcp<2.0.0`,故落到官方 SDK v1):
 
-- 官方 SDK v2:`from mcp.server import MCPServer`;`MCPServer("name")` 只描述 Server 身份,`host/port` 等传输参数传给 `run(transport="streamable-http", host=..., port=...)`;默认端点为 `/mcp`。
+- 官方 SDK v1:`from mcp.server.fastmcp import FastMCP`;`FastMCP("name", host=..., port=...)` 在构造器收传输参数,`run(transport="streamable-http")` 启动;默认端点为 `/mcp`。v2 的 `MCPServer` + `run(host=,port=)` 写法在 `mcp<2` 下不可用。
 - adapters:连接 `{"transport": "streamable_http", "url": ...}`;`get_tools(server_name=...)`;每次工具调用/清单拉取新建 session,因此「Server 侧加工具、只重启 Server」天然成立;`handle_tool_errors=False` 让 MCP 执行错误抛 `ToolException`,由本仓执行引擎统一分诊。
 
 ## 2. 与桌面 Spec/Plan 的差异(本仓裁定)
@@ -91,6 +91,7 @@ class ToolSpec:
 - `_get_tools_of(server_name)` 薄壳,作为单测 monkeypatch 锚点。
 - `fetch_mcp_specs()`:两台 Server 用 `asyncio.gather` 并发拉取,每台 `asyncio.wait_for(_get_tools_of(...), settings.mcp_discovery_timeout)`;单台超时/连不上 → `warning` + 跳过,不影响另一台。并发是为了让「两台都挂起」的等待上限仍是一次 3s,而不是 6s。
 - 每次拉取新建 session,不缓存清单:验收 3 的机制保证。
+- 两台 Server(`mcp_servers/logistics_server.py` / `aftersales_server.py`)各用 `FastMCP`,mock 数据用固定种子稳定;`MOCK_DELAY_SECONDS` 注入延迟(验收 6),`PORT` 覆盖端口。
 - 结果格式化只认我们侧登记:`FORMATTERS = {"query_logistics": _fmt_logistics, "query_warranty": _fmt_warranty, "query_return_status": _fmt_return}`;未登记工具透传。格式化挑回答用得上的字段、内部枚举码翻人话(如 `status_code: "IN_TRANSIT"` → `status: "运输中"`),剔除 `carrier_code`/`policy_ref` 这类内部编码。
 
 ### 4.4 执行引擎(`app/tools/engine.py`)
@@ -129,13 +130,14 @@ async def execute_tool_call(
 ### 4.6 建工单确认流(`app/graph/nodes.py::agent_tools`)
 
 1. 取 `last.tool_calls`,先 `specs = {s.name: s for s in await registry.get_all_specs()}`。
-2. 若有 `create_ticket` 且参数通过 `engine.validate_args`:在**执行任何工具之前** `interrupt({"type": "confirm_ticket", "preview": {"ticket_type": ..., "description": ...}})`。interrupt 前只做纯计算,resume 时节点从头重跑安全(照 `fetch_order` 范式)。
+2. 若有 `create_ticket` 且存在参数通过 `engine.validate_args` 的调用:在**执行任何工具之前** `interrupt({"type": "confirm_ticket", "preview": {"ticket_type": ..., "description": ...}})`,预览取第一个合法调用。interrupt 前只做纯计算,resume 时节点从头重跑安全(照 `fetch_order` 范式)。
 3. 参数不通过 → 不 interrupt,交引擎按「校验拦下」回灌并落审计,模型自然向用户追问。`classify_intent` 判出「人工」时置 `ticket_followup=True`(下一轮粘一轮 business),`agent_tools` 在校验失败时也置 True 作兜底——模型有时只口头追问、根本不发 `create_ticket`,不能只靠失败调用来置标记。下一轮 `classify_intent` 见到该标记就**零模型直接判「人工」、路由 business**,并在同一次返回里把标记清掉——只粘一轮。用户若突然换话题,这一轮也走通用 Agent(它本来就能答物流/订单/商品问题),下一轮恢复正常分流。
 4. resume 值:`{"confirmed": true}` → 引擎带 `confirmed=True` 真执行,`ToolMessage` 带工单号;`{"confirmed": false}` → 引擎带 `confirmed=False` + 明确 `deny_note`,落「权限拒绝」审计,回灌「用户取消了本次建工单,请不要再发起」。resume 值不是 dict 时按取消处理。
-5. 一轮多个 `create_ticket`:只处理第一个;其余调用也过引擎、按未确认写拒绝并落审计,回灌「一次只处理一个建工单请求」。
-6. 其余工具(`query_order`、MCP 工具等)在 interrupt 之后照常走引擎;`submit_refund` 的 ch06 拦截保持原样(转前端退款表单,不经引擎、不落审计——它只是动作提议,不执行)。
-7. `AGENT_SYSTEM` 工具原则改写:仅用户明确要求建工单/转人工跟进才发起;发起前核对问题描述等必填信息,缺则追问,严禁编造或占位;预览取消后不得擅自重试;补一条「工具清单可能动态变化,按用途描述选用;工具报错时按说明修正或如实告知」。`create_ticket` 的工具描述同步改。
-8. ch05 投诉路径不动:`complaint_reply` 仍产出 `create_ticket` 建议动作 → 前端「建工单」按钮 → `POST /api/actions/create-ticket`,点按钮即用户确认。
+5. 一轮多个 `create_ticket`:只处理第一个参数合法的调用;其余调用也过引擎、按未确认写拒绝或校验拦下落审计,回灌「一次只处理一个建工单请求」。
+6. 追问轮补一条 `_TICKET_FOLLOWUP_HINT`(「用户上一轮明确要求建单,这一轮在补充问题;已能概括问题就直接调用,不要额外索要订单号等非必填信息」),只在当前轮最后一条是用户消息时注入——resume 后最后一条是 AIMessage,不再提示,避免确认/取消后模型二次发起。该提示只影响这一轮,不替代权限门。
+7. 其余工具(`query_order`、MCP 工具等)在 interrupt 之后照常走引擎;`submit_refund` 的 ch06 拦截保持原样(转前端退款表单,不经引擎、不落审计——它只是动作提议,不执行)。
+8. `AGENT_SYSTEM` 工具原则改写:仅用户明确要求建工单/转人工跟进才发起;发起前核对问题描述等必填信息,缺则追问,严禁编造或占位;预览取消后不得擅自重试;补一条「工具清单可能动态变化,按用途描述选用;工具报错时按说明修正或如实告知」。`create_ticket` 的工具描述同步改。
+9. ch05 投诉路径不动:`complaint_reply` 仍产出 `create_ticket` 建议动作 → 前端「建工单」按钮 → `POST /api/actions/create-ticket`,点按钮即用户确认。
 
 **interrupt/resume 的传输改造:**
 

@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -44,7 +45,42 @@ def test_resume_requires_order_id_or_confirmed():
     assert r.status_code == 400
 
 
-def test_resume_confirmed_builds_confirmation_payload(monkeypatch):
+@pytest.fixture()
+def pending(monkeypatch):
+    state = {"value": {"type": "confirm_ticket", "preview": {}}}
+
+    async def fake_pending(cid):
+        return state["value"]
+
+    monkeypatch.setattr(actions.runtime, "pending_interrupt", fake_pending)
+    return state
+
+
+def test_resume_rejects_when_nothing_pending(monkeypatch):
+    async def none_pending(cid):
+        return None
+
+    monkeypatch.setattr(actions.runtime, "pending_interrupt", none_pending)
+    r = TestClient(app).post("/api/actions/resume", json={
+        "conversation_id": 5, "confirmed": True})
+    assert r.status_code == 400
+
+
+def test_resume_rejects_mismatched_payload(pending):
+    # 当前在等订单选择,却传 confirmed → 不能把 dict 当订单号
+    pending["value"] = {"type": "select_order", "orders": []}
+    r = TestClient(app).post("/api/actions/resume", json={
+        "conversation_id": 5, "confirmed": True})
+    assert r.status_code == 400
+
+    # 当前在等工单确认,却传 order_id
+    pending["value"] = {"type": "confirm_ticket", "preview": {}}
+    r = TestClient(app).post("/api/actions/resume", json={
+        "conversation_id": 5, "order_id": "1001"})
+    assert r.status_code == 400
+
+
+def test_resume_confirmed_builds_confirmation_payload(monkeypatch, pending):
     seen = {}
 
     async def fake_stream(cid, value):
@@ -60,7 +96,8 @@ def test_resume_confirmed_builds_confirmation_payload(monkeypatch):
     assert seen == {"cid": 5, "value": {"confirmed": True}}
 
 
-def test_resume_order_id_stays_string(monkeypatch):
+def test_resume_order_id_stays_string(monkeypatch, pending):
+    pending["value"] = {"type": "select_order", "orders": []}
     seen = {}
 
     async def fake_stream(cid, value):

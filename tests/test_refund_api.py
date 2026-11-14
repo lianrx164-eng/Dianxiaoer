@@ -24,6 +24,9 @@ def test_create_refund_rejects_bad_reason():
 
 
 def test_resume_endpoint_streams(monkeypatch):
+    async def fake_pending(cid):
+        return {"type": "select_order", "orders": []}
+
     async def fake_stream_resume(cid, resume_value):
         assert cid == 3 and resume_value == "1001"
         yield {"type": "delta", "text": "这一单可以退款"}
@@ -31,6 +34,7 @@ def test_resume_endpoint_streams(monkeypatch):
                "items": [{"type": "refund_form", "draft": {"order_id": "1001"}}]}
         yield {"type": "done", "conversation_id": 3}
 
+    monkeypatch.setattr(actions.runtime, "pending_interrupt", fake_pending)
     monkeypatch.setattr(actions.runtime, "stream_resume", fake_stream_resume)
     r = TestClient(app).post("/api/actions/resume",
                              json={"conversation_id": 3, "order_id": "1001"})
