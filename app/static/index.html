@@ -840,9 +840,11 @@
       status.className = 'status-line';
       status.textContent = o.status || '';
       card.append(head, product, status);
-      card.addEventListener('click', () => {
+      card.addEventListener('click', async () => {
         for (const c of wrap.querySelectorAll('.order-card')) c.disabled = true;
-        resumeWithOrder(o.order_id);
+        const ok = await resumeWithOrder(o.order_id);
+        // 续跑失败时恢复可点,用户能重试;否则卡片会永久禁用、错误提示又指不出重试入口
+        if (!ok) for (const c of wrap.querySelectorAll('.order-card')) c.disabled = false;
       });
       wrap.append(card);
     }
@@ -918,7 +920,11 @@
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       err.textContent = '';
-      if (!order.value || !select.value) {
+      if (!order.value) {
+        err.textContent = '订单号缺失,请重新选择订单';
+        return;
+      }
+      if (!select.value) {
         err.textContent = '请选择退款原因';
         return;
       }
@@ -1011,7 +1017,7 @@
   async function resumeWithOrder(orderId) {
     if (!conversationId) {
       addNotice('会话已失效,请点击「+ 新对话」重试');
-      return;
+      return false;
     }
     setBusy(true);
     const { bubble, toolsEl, textEl } = createAssistantRow();
@@ -1035,17 +1041,19 @@
         }
         textEl.classList.remove('streaming');
         renderOrders(bubble, interrupt);
-        return;
+        return true;
       }
       if (!ui.rawText) textEl.textContent = '(小喵这次没有回复内容,请再试一次)';
       else addFeedback(bubble);
       if (ui.actions.length) renderActions(bubble, ui.actions);
       textEl.classList.remove('streaming');
+      return true;
     } catch (err) {
       textEl.classList.remove('streaming');
       if (bubble.parentElement) bubble.parentElement.remove();
       const msg = err && err.message ? err.message : '未知错误';
       addNotice('续跑失败:' + msg + '。请再试一次。');
+      return false;
     } finally {
       setBusy(false);
       inputEl.focus();

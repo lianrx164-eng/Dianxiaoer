@@ -42,12 +42,17 @@ def _user_text(state) -> str:
 
 def _history_text(state, max_messages: int = 6) -> str:
     """把本轮之前的 human/ai 消息压成紧凑文本,供 coref / 意图识别读上下文。
-    不含本轮最后一条 human(那是待处理的话本身)。"""
+    不含本轮最后一条 human(那是待处理的话本身);工具 JSON 也不进(它不是客服话术)。"""
     msgs = state.get("messages", [])
     prior = msgs[:-1] if msgs else []
     lines = []
     for m in prior[-max_messages:]:
-        role = "用户" if isinstance(m, HumanMessage) else "客服"
+        if isinstance(m, HumanMessage):
+            role = "用户"
+        elif isinstance(m, AIMessage):
+            role = "客服"
+        else:
+            continue
         text = m.content if isinstance(m.content, str) else ""
         if text:
             lines.append(f"{role}:{text}")
@@ -123,22 +128,35 @@ async def classify_intent(state) -> dict:
 
 
 _ORDER_RE = re.compile(r"(?<!\d)(\d{4,})(?!\d)")
+_ORDER_CUES = ("订单", "单号", "尾号", "order", "Order", "ORDER")
 
 
-def _extract_order_id(text: str) -> str | None:
-    """抽 4+ 位连续数字当订单号。中文与数字之间没有 \\b 边界,故用前后非数字断言。"""
-    m = _ORDER_RE.search(text or "")
-    return m.group(1) if m else None
+def _extract_order_id(text: str, known_orders: set[str] | None = None) -> str | None:
+    """抽订单号,只认两种候选:①紧邻订单线索(订单/单号/尾号/order,且线索与数字之间
+    没有别的数字);②是该用户名下的订单。手机号、金额、年份一律不认——宁可弹选择器,
+    也不拿假单号去编造订单。中文与数字之间没有 \\b 边界,故用前后非数字断言。"""
+    text = text or ""
+    known = known_orders or set()
+    for m in _ORDER_RE.finditer(text):
+        cand = m.group(1)
+        if cand in known:
+            return cand
+        before = text[max(0, m.start() - 12):m.start()]
+        cue_pos = max((before.rfind(c) for c in _ORDER_CUES), default=-1)
+        if cue_pos != -1 and not any(ch.isdigit() for ch in before[cue_pos:]):
+            return cand
+    return None
 
 
 async def fetch_order(state) -> dict:
     """退款子流程第一步:抽订单号;缺则 interrupt 弹订单选择器等前端点选(resume 回填);
     拿到后 order_snapshot 取订单数据。interrupt 之前只做只读(resume 时本节点从头重跑)。"""
-    oid = state.get("order_id") or _extract_order_id(
-        state.get("resolved_query") or _user_text(state))
+    orders = business.list_user_orders(state.get("user_id", ""))   # 只读,可安全重跑
+    known = {str(o["order_id"]) for o in orders}
+    text = state.get("resolved_query") or _user_text(state)
+    oid = state.get("order_id") or _extract_order_id(text, known)
     if not oid:
-        orders = business.list_user_orders(state.get("user_id", ""))
-        oid = interrupt({"type": "select_order", "orders": orders})
+        oid = interrupt({"type": "select_order", "orders": orders})    # resume 回填订单号
     data = business.order_snapshot(oid)
     return {"order_id": oid, "order_data": data,
             "trace": trace_of(state, fetch_order={"order_id": oid})}
@@ -215,9 +233,18 @@ def _agent_messages(state) -> list:
     return [SystemMessage(sys), *history]
 
 
+def _tools_for(state) -> list:
+    """submit_refund 只在退款子流程里可见;其他路不让模型看见退款工具,
+    避免误分类时产出没有订单号、没有政策依据的退款表单。"""
+    tools = get_all_tools()
+    if state.get("route") == "refund_flow":
+        return tools
+    return [t for t in tools if t.name != "submit_refund"]
+
+
 async def agent_llm(state, config=None) -> dict:
     """ReAct 推理步:调模型(带工具),累加 steps 与 token 消耗。"""
-    model = get_chat_model(streaming=True).bind_tools(get_all_tools())
+    model = get_chat_model(streaming=True).bind_tools(_tools_for(state))
     ai: AIMessage = await model.ainvoke(_agent_messages(state), config)
     usage = ai.usage_metadata or {}
     steps = state.get("steps", 0) + 1
@@ -251,8 +278,14 @@ async def agent_tools(state) -> dict:
                 tool_call_id=tc["id"], name="create_ticket"))
         elif tc["name"] == "submit_refund":
             args = tc.get("args") or {}
-            draft = {"order_id": args.get("order_id") or state.get("order_id", ""),
-                     "reason": args.get("reason")}
+            order_id = args.get("order_id") or state.get("order_id", "")
+            if state.get("route") != "refund_flow" or not order_id:
+                tool_msgs.append(ToolMessage(
+                    content=("当前不在退款流程或缺少订单号,不能发起退款申请;"
+                             "请按当前问题继续作答,不要声称已提交。"),
+                    tool_call_id=tc["id"], name="submit_refund"))
+                continue
+            draft = {"order_id": order_id, "reason": args.get("reason")}
             key = ("submit_refund", str(draft))
             if key not in seen:
                 actions.append({"type": "refund_form", "draft": draft})

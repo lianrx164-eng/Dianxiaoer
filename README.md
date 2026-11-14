@@ -245,6 +245,7 @@ checkpointer 的 sqlite 文件由 `AsyncSqliteSaver.setup()` 自建,已在 `.git
 
 - 退款类问题不带订单号:聊天流里出现订单卡片;点选后自动续跑,判定结果下出现「提交退款工单」按钮。
 - 退款表单:订单号只读 + 原因固定下拉(七天无理由/质量问题/发错货/不想要了/其他),提交后写 `tickets`(`ticket_type='退款'`)并显示单号。
+- 订单选择器暂停期间新消息不会被处理(图停在补槽位):请点选订单,或点「+ 新对话」重新开始。
 
 ### 验收映射
 
@@ -256,4 +257,3 @@ checkpointer 的 sqlite 文件由 `AsyncSqliteSaver.setup()` 自建,已在 `.git
 ### 测试
 
     uv run pytest -q   # 需 MySQL;interrupt 单测用最小图 + InMemorySaver
-

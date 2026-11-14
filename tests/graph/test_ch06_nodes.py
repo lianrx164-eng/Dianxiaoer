@@ -62,6 +62,79 @@ def test_extract_order_id():
     assert nodes._extract_order_id("我要退货") is None
 
 
+def test_extract_order_id_rejects_phone_amount_year():
+    assert nodes._extract_order_id("我要退款 手机号13812345678") is None
+    assert nodes._extract_order_id("退款金额3999.00元") is None
+    assert nodes._extract_order_id("我2026年买的猫粮要退款") is None
+    # 同句里前一个数字带「订单」线索,不能顺带把后面的金额也认成订单号
+    assert nodes._extract_order_id("订单1001 金额3999") == "1001"
+
+
+def test_extract_order_id_accepts_known_order_without_cue():
+    assert nodes._extract_order_id("帮我退 7495", {"7495"}) == "7495"
+    assert nodes._extract_order_id("帮我退 7495", set()) is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_order_ignores_phone_number(monkeypatch):
+    monkeypatch.setattr(nodes.business, "list_user_orders",
+                        lambda uid: [{"order_id": "1001", "product": "猫粮",
+                                      "status": "已签收", "amount": 99}])
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.graph import END, START, StateGraph
+
+    from app.graph.state import ConversationState
+
+    b = StateGraph(ConversationState)
+    b.add_node("fetch_order", nodes.fetch_order)
+    b.add_edge(START, "fetch_order")
+    b.add_edge("fetch_order", END)
+    graph = b.compile(checkpointer=InMemorySaver())
+    out = await graph.ainvoke(
+        {"resolved_query": "我要退款 手机号13812345678", "user_id": "u1"},
+        {"configurable": {"thread_id": "t-phone"}})
+    assert out["__interrupt__"][0].value["type"] == "select_order"
+
+
+@pytest.mark.asyncio
+async def test_fetch_order_resume_queries_snapshot_once(monkeypatch):
+    calls = {"list": 0, "snapshot": 0}
+    real_snapshot = nodes.business.order_snapshot
+
+    def fake_list(uid):
+        calls["list"] += 1
+        return [{"order_id": "1001", "product": "猫粮",
+                 "status": "已签收", "amount": 99}]
+
+    def counting_snapshot(oid):
+        calls["snapshot"] += 1
+        return real_snapshot(oid)
+
+    monkeypatch.setattr(nodes.business, "list_user_orders", fake_list)
+    monkeypatch.setattr(nodes.business, "order_snapshot", counting_snapshot)
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.graph import END, START, StateGraph
+    from langgraph.types import Command
+
+    from app.graph.state import ConversationState
+
+    b = StateGraph(ConversationState)
+    b.add_node("fetch_order", nodes.fetch_order)
+    b.add_edge(START, "fetch_order")
+    b.add_edge("fetch_order", END)
+    graph = b.compile(checkpointer=InMemorySaver())
+    cfg = {"configurable": {"thread_id": "t-resume"}}
+
+    first = await graph.ainvoke({"resolved_query": "我要退款", "user_id": "u1"}, cfg)
+    assert first["__interrupt__"][0].value["orders"][0]["order_id"] == "1001"
+    assert calls["snapshot"] == 0          # interrupt 之前不查单
+
+    done = await graph.ainvoke(Command(resume="1001"), cfg)
+    assert done["order_id"] == "1001"
+    assert calls["list"] == 2              # 节点从头重跑;只读可重跑
+    assert calls["snapshot"] == 1          # 查单只在 resume 后发生一次
+
+
 @pytest.mark.asyncio
 async def test_fetch_order_uses_id_in_query():
     out = await nodes.fetch_order({"resolved_query": "订单1001能退吗", "user_id": "u1"})
@@ -143,7 +216,8 @@ async def test_agent_tools_intercepts_submit_refund():
     ai = AIMessage(content="", tool_calls=[
         {"id": "r1", "name": "submit_refund",
          "args": {"order_id": "1001", "reason": None}}])
-    out = await nodes.agent_tools({"messages": [ai], "order_id": "1001"})
+    out = await nodes.agent_tools({"messages": [ai], "order_id": "1001",
+                                   "route": "refund_flow"})
     assert out["suggested_actions"] == [
         {"type": "refund_form",
          "draft": {"order_id": "1001", "reason": None}}]
@@ -173,6 +247,38 @@ def test_agent_messages_knowledge_path_still_injects_evidence():
         "route": "knowledge", "evidence": "[1] 运费: 满99包邮",
         "messages": [HumanMessage("运费多少")]})
     assert "满99包邮" in msgs[0].content
+
+
+def test_tools_for_hides_submit_refund_outside_refund_flow():
+    business_names = {t.name for t in nodes._tools_for({"route": "business"})}
+    refund_names = {t.name for t in nodes._tools_for({"route": "refund_flow"})}
+    assert "submit_refund" not in business_names
+    assert "submit_refund" in refund_names
+
+
+@pytest.mark.asyncio
+async def test_agent_tools_refuses_submit_refund_outside_refund_flow():
+    from langchain_core.messages import ToolMessage
+
+    ai = AIMessage(content="", tool_calls=[
+        {"id": "r2", "name": "submit_refund",
+         "args": {"order_id": "", "reason": None}}])
+    out = await nodes.agent_tools({"messages": [ai], "route": "business"})
+    assert not out.get("suggested_actions")
+    assert isinstance(out["messages"][0], ToolMessage)
+    assert "不能发起退款" in out["messages"][0].content
+
+
+def test_history_text_skips_tool_messages():
+    from langchain_core.messages import ToolMessage
+
+    hist = nodes._history_text({"messages": [
+        HumanMessage("订单1001到哪了"),
+        ToolMessage(content='{"order_id":"1001","status":"已发货"}', tool_call_id="1"),
+        AIMessage("已发货"),
+        HumanMessage("那它能退吗")]})
+    assert "order_id" not in hist
+    assert "已发货" in hist and "订单1001到哪了" in hist
 
 
 @pytest.mark.asyncio
