@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 
@@ -16,6 +17,7 @@ from app.core.prompts import (
     CHITCHAT_REPLY_TEXT,
     COMPLAINT_REPLY_TEXT,
     FALLBACK_REPLY_TEXT,
+    REFUND_JUDGE_HINT,
 )
 from app.db import repository
 from app.graph.routing import INTENT_TO_ROUTE
@@ -200,10 +202,13 @@ _KNOWLEDGE_EVIDENCE_HINT = (
 
 
 def _agent_messages(state) -> list:
-    """system(知识路拼证据) + 按 token 预算裁剪过的跨轮历史。"""
+    """system(有证据就拼,知识路/退款路通用;退款路再拼 order_data + 判定指令)+ 跨轮历史。"""
     sys = AGENT_SYSTEM
-    if state.get("route") == "knowledge" and state.get("evidence"):
-        sys = AGENT_SYSTEM + _KNOWLEDGE_EVIDENCE_HINT + state["evidence"]
+    if state.get("evidence"):
+        sys = sys + _KNOWLEDGE_EVIDENCE_HINT + state["evidence"]
+    if state.get("route") == "refund_flow":
+        sys = (sys + REFUND_JUDGE_HINT
+               + json.dumps(state.get("order_data") or {}, ensure_ascii=False))
     history = trim_history(state.get("messages", []), max_tokens=settings.token_budget)
     return [SystemMessage(sys), *history]
 
@@ -242,6 +247,19 @@ async def agent_tools(state) -> dict:
                          "请用一句话请用户点击下方『建工单』按钮提交;"
                          "不要声称已提交、已登记或已创建,也不要再调用任何工具。"),
                 tool_call_id=tc["id"], name="create_ticket"))
+        elif tc["name"] == "submit_refund":
+            args = tc.get("args") or {}
+            draft = {"order_id": args.get("order_id") or state.get("order_id", ""),
+                     "reason": args.get("reason")}
+            key = ("submit_refund", str(draft))
+            if key not in seen:
+                actions.append({"type": "refund_form", "draft": draft})
+                seen.add(key)
+            tool_msgs.append(ToolMessage(
+                content=("已把『提交退款工单』选项交给用户自行确认,尚未提交退款。"
+                         "请用一句话说明这一单可以退款并停止,不要声称已提交或已退款,"
+                         "也不要再调用任何工具。"),
+                tool_call_id=tc["id"], name="submit_refund"))
         else:
             run = await execute_tool_call(tc, state.get("conversation_id", 0))
             tool_msgs.append(run.tool_message)

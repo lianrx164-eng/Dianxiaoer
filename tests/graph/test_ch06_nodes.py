@@ -135,3 +135,40 @@ async def test_retrieve_policy_expands_dedups_merges(monkeypatch):
     assert out["trace"]["retrieve_policy"]["hits"] == 2
     assert out["trace"]["retrieve_policy"]["queries"] == [
         "退货政策", "无理由退换货", "退货时限"]
+
+
+@pytest.mark.asyncio
+async def test_agent_tools_intercepts_submit_refund():
+    ai = AIMessage(content="", tool_calls=[
+        {"id": "r1", "name": "submit_refund",
+         "args": {"order_id": "1001", "reason": None}}])
+    out = await nodes.agent_tools({"messages": [ai], "order_id": "1001"})
+    assert out["suggested_actions"] == [
+        {"type": "refund_form",
+         "draft": {"order_id": "1001", "reason": None}}]
+    tm = out["messages"][0]
+    assert tm.name == "submit_refund"
+    assert "退款" in tm.content
+
+
+def test_agent_messages_injects_order_and_policy_on_refund():
+    from langchain_core.messages import SystemMessage
+
+    msgs = nodes._agent_messages({
+        "route": "refund_flow",
+        "order_data": {"order_id": "1001", "status": "已签收",
+                       "product": "猫粮 5kg"},
+        "evidence": "[1] 退货: 7天无理由",
+        "messages": [HumanMessage("这单能退吗")]})
+    sys = msgs[0]
+    assert isinstance(sys, SystemMessage)
+    assert "7天无理由" in sys.content
+    assert "猫粮 5kg" in sys.content
+    assert "submit_refund" in sys.content
+
+
+def test_agent_messages_knowledge_path_still_injects_evidence():
+    msgs = nodes._agent_messages({
+        "route": "knowledge", "evidence": "[1] 运费: 满99包邮",
+        "messages": [HumanMessage("运费多少")]})
+    assert "满99包邮" in msgs[0].content
