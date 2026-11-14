@@ -12,6 +12,7 @@ from app.core import evidence
 from app.core import intent as intent_mod
 from app.core import query_understanding, retrieval
 from app.core.llm import get_chat_model
+from app.core.observability import tag_intent
 from app.core.prompts import (
     AGENT_SYSTEM,
     CHITCHAT_REPLY_TEXT,
@@ -131,6 +132,7 @@ async def classify_intent(state) -> dict:
     _agent_messages 判注入、log 留痕;route_by_intent 条件边按同一 INTENT_TO_ROUTE 分流)。
     建单追问后的补充句单看会被判售后/商品咨询,靠 ticket_followup 粘一轮、直接走 business。"""
     if state.get("ticket_followup"):
+        tag_intent("人工", 1.0)
         return {"intent": "人工", "intent_confidence": 1.0, "route": "business",
                 "ticket_followup": False,
                 "trace": trace_of(state, intent="人工", intent_confidence=1.0,
@@ -139,6 +141,7 @@ async def classify_intent(state) -> dict:
     r = await intent_mod.classify(query, _history_text(state))
     intent, conf = r["intent"], r["confidence"]
     route = INTENT_TO_ROUTE.get(intent, "business")
+    tag_intent(intent, conf)   # ch09:意图进当前 trace 的 metadata+tag,Cost Control 按意图分堆
     return {"intent": intent, "intent_confidence": conf, "route": route,
             # 人工意图的下一轮直接粘一轮 business:模型这一轮可能只是口头追问、
             # 没有发 create_ticket,不能靠 agent_tools 的失败调用来置标记。
