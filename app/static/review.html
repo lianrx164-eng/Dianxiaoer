@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>飞轮待审队列 | 喵喵优选</title>
+<link rel="stylesheet" href="/static/acceptance.css">
+<script src="/static/admin.js"></script>
+<script src="/static/acceptance.js"></script>
+<style>
+  .gates {
+    border: 2px dashed #c9a36a; background: #fff8ec; padding: 10px 14px;
+    font-size: 12.5px; line-height: 1.7; margin: 0 0 16px;
+  }
+  .review-list { display: flex; flex-direction: column; gap: 10px; }
+  .review-item {
+    border: 2px solid #1c1c1c; background: #fffdf8; box-shadow: 4px 4px 0 #1c1c1c;
+  }
+  .review-head {
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+    padding: 10px 14px; cursor: pointer;
+  }
+  .review-q { font-weight: 700; font-size: 14px; flex: 1; min-width: 220px; }
+  .occ { font-weight: 700; color: #b45309; font-size: 12px; }
+  .review-answer { flex-basis: 100%; color: #6b5b45; font-size: 12.5px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .review-body { border-top: 2px dashed #d8c9ae; padding: 12px 14px; display: none; }
+  .review-item.open .review-body { display: block; }
+  .raw { border-left: 4px solid #c9a36a; padding: 8px 12px; margin: 0 0 12px; background: #faf3e6; }
+  .raw-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 12px; color: #6b5b45; }
+  .snap-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin-top: 8px; }
+  .snap { border: 1px solid #d8c9ae; background: #fff; padding: 8px 10px; font-size: 12px; }
+  .snap .score { font-weight: 700; color: #b45309; }
+  .snap .path { color: #8a7760; font-size: 11px; margin-bottom: 4px; }
+  .hint { color: #8a7760; font-size: 12px; margin: 4px 0 10px; }
+  .modal-mask { position: fixed; inset: 0; background: rgba(28, 28, 28, .45);
+    display: grid; place-items: center; z-index: 50; }
+  .modal { width: min(560px, 92vw); background: #fffdf8; border: 3px solid #1c1c1c;
+    box-shadow: 8px 8px 0 #1c1c1c; padding: 18px 20px; }
+  .modal h2 { margin: 0 0 10px; font-size: 17px; }
+  .modal textarea { width: 100%; min-height: 120px; padding: 10px; font: inherit;
+    border: 2px solid #1c1c1c; background: #fff8ec; resize: vertical; }
+  .modal .btnrow { margin-top: 12px; justify-content: flex-end; }
+  .src-retrieval_low_conf { color: #9a3412; border-color: #9a3412; background: #fde9c8; }
+  .src-self_check { color: #1d4ed8; border-color: #1d4ed8; background: #e8f4ff; }
+  .src-user_feedback { color: #166534; border-color: #166534; background: #eef7ee; }
+</style>
+</head>
+<body class="admin-page">
+<div id="admin-nav"></div>
+<main class="admin-shell">
+  <h1 class="admin-title">飞轮待审队列</h1>
+  <p class="admin-sub">一行 = 一个去重后的知识缺口;出现次数越多越该优先补。</p>
+
+  <div class="gates">
+    <strong>审核前先过三道闸:</strong>
+    ① 垃圾过滤——乱输入、测试胡打、不当言论直接驳回;
+    ② 时效——强时效问题(活动截止类)不沉淀,驳回;
+    ③ 频次——低频冷门问题不值得占库,驳回。
+  </div>
+
+  <div class="btnrow" style="margin-bottom:14px">
+    <label class="muted">状态
+      <select id="status">
+        <option value="待审" selected>待审</option>
+        <option value="通过">通过</option>
+        <option value="驳回">驳回</option>
+        <option value="">全部</option>
+      </select>
+    </label>
+    <button class="btn" id="refresh">刷新</button>
+    <span class="toast" id="toast"></span>
+  </div>
+
+  <div class="review-list" id="list"><span class="muted">读取中…</span></div>
+</main>
+
+<script>
+  mountAdminNav('review');
+  const { el, getJSON, pill } = AC;
+  const SOURCE_LABEL = {
+    retrieval_low_conf: '检索置信度低',
+    self_check: '模型自评不足',
+    user_feedback: '用户反馈',
+  };
+  const STATUS_KIND = { '待审': 'warn', '通过': 'ok', '驳回': 'bad' };
+
+  const list = document.getElementById('list');
+  const toast = document.getElementById('toast');
+
+  function say(msg, kind) {
+    toast.textContent = msg;
+    toast.className = 'toast' + (kind ? ' ' + kind : '');
+  }
+
+  function statusPill(s) {
+    return el('span', { class: 'pill ' + (STATUS_KIND[s] || ''), text: s });
+  }
+
+  function sourcePill(src) {
+    return el('span', { class: 'pill src-' + src, text: SOURCE_LABEL[src] || src });
+  }
+
+  function snapshotCard(c) {
+    return el('div', { class: 'snap' }, [
+      el('div', { class: 'path', text: c.section_path || '' }),
+      el('div', {}, [
+        document.createTextNode((c.question || '') + ': '),
+        el('span', { text: c.answer || '' }),
+      ]),
+      el('div', {}, [
+        document.createTextNode('精排得分 '),
+        el('span', { class: 'score', text: Number(c.rerank_score || 0).toFixed(3) }),
+      ]),
+    ]);
+  }
+
+  function rawBlock(r) {
+    const chunks = r.retrieved_chunks;
+    const meta = el('div', { class: 'raw-meta' }, [
+      sourcePill(r.source),
+      el('span', { text: r.created_at ? r.created_at.replace('T', ' ').slice(0, 16) : '' }),
+    ]);
+    const body = [el('div', { class: 'review-q', text: '「' + r.raw_question + '」' }), meta];
+    if (Array.isArray(chunks) && chunks.length) {
+      const grid = el('div', { class: 'snap-grid' }, chunks.map(snapshotCard));
+      body.push(el('div', { class: 'hint', text: '对着快照判断:知识库真缺这块,还是有但没检到。' }));
+      body.push(grid);
+    } else {
+      body.push(el('div', { class: 'hint', text: '该入口未走检索,无快照。' }));
+    }
+    return el('div', { class: 'raw' }, body);
+  }
+
+  function openApprove(item) {
+    const mask = el('div', { class: 'modal-mask' });
+    const ta = el('textarea');
+    ta.value = item.ai_suggested_answer || '';
+    const cancel = el('button', { class: 'btn', text: '取消' });
+    const confirm = el('button', { class: 'btn primary', text: '确认通过并写回知识库' });
+    const modal = el('div', { class: 'modal' }, [
+      el('h2', { text: '通过并写回知识库' }),
+      el('p', { class: 'muted', text: item.normalized_question }),
+      ta,
+      el('div', { class: 'btnrow' }, [cancel, confirm]),
+    ]);
+    mask.appendChild(modal);
+    cancel.onclick = () => mask.remove();
+    confirm.onclick = async () => {
+      confirm.disabled = true;
+      try {
+        await getJSON('/api/review/' + item.id + '/approve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ approved_answer: ta.value }),
+        });
+        mask.remove();
+        say('已写回知识库,下次同类问题可直接检索命中。', 'ok');
+        load();
+      } catch (e) {
+        say('写回失败:' + e.message + '(可重试)', 'bad');
+        confirm.disabled = false;
+      }
+    };
+    document.body.appendChild(mask);
+  }
+
+  async function reject(item) {
+    try {
+      await getJSON('/api/review/' + item.id + '/reject', { method: 'POST' });
+      say('已驳回(终审)。', 'ok');
+      load();
+    } catch (e) {
+      say('驳回失败:' + e.message, 'bad');
+    }
+  }
+
+  function renderItem(item) {
+    const head = el('div', { class: 'review-head' }, [
+      el('span', { class: 'review-q', text: item.normalized_question }),
+      el('span', { class: 'occ', text: '出现 ' + item.occurrence_count + ' 次' }),
+      statusPill(item.review_status),
+    ]);
+    if (item.review_status === '待审') {
+      const ok = el('button', { class: 'btn primary', text: '通过' });
+      const no = el('button', { class: 'btn', text: '驳回' });
+      ok.onclick = (e) => { e.stopPropagation(); openApprove(item); };
+      no.onclick = (e) => { e.stopPropagation(); reject(item); };
+      head.appendChild(ok);
+      head.appendChild(no);
+    }
+    const excerpt = el('div', { class: 'review-answer',
+      text: '示例答案:' + (item.ai_suggested_answer || '(模型未给)') });
+    const body = el('div', { class: 'review-body' }, [el('span', { class: 'muted', text: '读取中…' })]);
+    const box = el('div', { class: 'review-item' }, [head, excerpt, body]);
+    head.onclick = async () => {
+      box.classList.toggle('open');
+      if (!box.classList.contains('open') || box.dataset.loaded) return;
+      try {
+        const d = await getJSON('/api/review/' + item.id);
+        body.innerHTML = '';
+        if (!d.raws.length) body.appendChild(el('span', { class: 'muted', text: '没有归并进来的原话。' }));
+        d.raws.forEach((r) => body.appendChild(rawBlock(r)));
+        box.dataset.loaded = '1';
+      } catch (e) {
+        body.innerHTML = '';
+        body.appendChild(el('span', { class: 'muted', text: '详情读取失败:' + e.message }));
+      }
+    };
+    return box;
+  }
+
+  async function load() {
+    const status = document.getElementById('status').value;
+    list.innerHTML = '<span class="muted">读取中…</span>';
+    try {
+      const url = '/api/review/queue' + (status ? '?status=' + encodeURIComponent(status) : '');
+      const data = await getJSON(url);
+      list.innerHTML = '';
+      if (!data.items.length) {
+        list.appendChild(el('span', { class: 'muted', text: '队列为空。' }));
+        return;
+      }
+      data.items.forEach((item) => list.appendChild(renderItem(item)));
+    } catch (e) {
+      list.innerHTML = '';
+      list.appendChild(el('span', { class: 'muted', text: '读取失败:' + e.message }));
+    }
+  }
+
+  document.getElementById('refresh').onclick = load;
+  document.getElementById('status').onchange = load;
+  load();
+</script>
+</body>
+</html>

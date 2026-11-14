@@ -15,6 +15,7 @@ from app.api.extract import router as extract_router
 from app.api.feedback import router as feedback_router
 from app.api.jobs import router as jobs_router
 from app.api.kb import router as kb_router
+from app.api.observability import router as observability_router
 from app.api.rageval import router as rageval_router
 from app.api.review import router as review_router
 from app.graph import runtime
@@ -57,6 +58,7 @@ app.include_router(admin_router)
 app.include_router(rageval_router)
 app.include_router(feedback_router)
 app.include_router(review_router)
+app.include_router(observability_router)
 app.include_router(actions_router)
 app.include_router(conversations_router)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -80,3 +82,13 @@ def admin_page() -> FileResponse:
 @app.get("/rag-eval", include_in_schema=False)
 def rag_eval_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "rageval.html")
+
+
+@app.get("/review", include_in_schema=False)
+def review_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "review.html")
+
+
+@app.get("/observability", include_in_schema=False)
+def observability_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "observability.html")

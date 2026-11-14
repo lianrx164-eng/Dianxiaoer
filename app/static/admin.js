@@ -25,6 +25,8 @@
       ['admin', '后台首页', '/admin'],
       ['kb', '知识库', '/kb'],
       ['rag-eval', 'RAG 评估', '/rag-eval'],
+      ['review', '飞轮待审', '/review'],
+      ['observability', '观测与成本', '/observability'],
       ['chat', '聊天页', '/'],
     ];
     const nav = document.createElement('nav');
