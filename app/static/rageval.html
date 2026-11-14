@@ -180,7 +180,7 @@
     panel.append(el('div', { class: 'panel-head' }, [
       el('span', { class: 'num', text: '2' }),
       el('h2', { text: '完整数据' }),
-      el('span', { class: 'hint', text: '分桶 MRR + 两项覆盖度;总体 MRR 最佳行带底色' }),
+      el('span', { class: 'hint', text: '分桶 MRR + 总体两项覆盖度;总体 MRR 最佳行带底色' }),
     ]));
     const body = el('div', { class: 'panel-body' });
     const table = el('table', { class: 'tbl' });
@@ -188,7 +188,7 @@
     const hr = el('tr');
     hr.append(el('th', { text: '策略' }));
     BUCKETS.forEach(b => hr.append(el('th', { class: 'num', text: b[1] + ' MRR' })));
-    ['总体 MRR', '总体 Recall@5', '总体证据覆盖度'].forEach(h =>
+    ['总体 MRR', '总体 Recall@5', '总体证据覆盖度', '总体答案覆盖度'].forEach(h =>
       hr.append(el('th', { class: 'num', text: h })));
     thead.append(hr);
     table.append(thead);
@@ -205,6 +205,9 @@
       tr.append(el('td', { class: 'num', text: num(overallValue(s[0], 'mrr')) }));
       tr.append(el('td', { class: 'num', text: pct(overallValue(s[0], 'recall@5')) }));
       tr.append(el('td', { class: 'num', text: pct(overallValue(s[0], 'coverage')) }));
+      const gen = data.generation && data.generation.answer_coverage
+        ? data.generation.answer_coverage[s[0]] : null;
+      tr.append(el('td', { class: 'num', text: gen ? pct(gen.overall) : '—' }));
       tbody.append(tr);
     });
     table.append(tbody);
@@ -310,7 +313,7 @@
     container.append(panel);
   }
 
-  async function renderFaithCases(container) {
+  async function renderFaithCases(container, hallucination) {
     const panel = el('div', { class: 'panel' });
     panel.append(el('div', { class: 'panel-head' }, [
       el('span', { class: 'num', text: '5' }),
@@ -334,7 +337,7 @@
         body.append(el('div', { class: 'empty-state', text: '台账读取失败:' + (e.message || e) }));
         return;
       }
-      const hall = window.__rag ? window.__rag.hallucination : null;
+      const hall = hallucination;
       const hint = document.getElementById('faithHint');
       if (hint && hall) {
         hint.textContent = `本轮判出 ${pct(hall.judged_rate)} · 人工确认 ${pct(hall.confirmed_rate)} · 台账累计 ${AC.fmt(hall.ledger_total)} 条`;
@@ -449,13 +452,12 @@
     renderTable(content);
     renderGeneration(content);
     renderCases(content);
-    renderFaithCases(content);
+    renderFaithCases(content, data.hallucination);
   }
 
   async function refresh() {
     try {
       data = await AC.getJSON('/api/rag-eval/overview');
-      window.__rag = data;
       render();
     } catch (e) {
       document.getElementById('content').innerHTML =

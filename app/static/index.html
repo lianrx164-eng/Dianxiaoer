@@ -614,7 +614,8 @@
     bubble.append(bar);
   }
 
-  async function sendMessage(text) {    text = text.trim();
+  async function sendMessage(text) {
+    text = text.trim();
     if (!text || busy) return;
     setBusy(true);
     let retried = false;

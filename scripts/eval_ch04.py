@@ -20,7 +20,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from app.config import settings
-from app.core import embeddings, judges, retrieval
+from app.core import embeddings, judges, query_understanding, retrieval, selfcheck
 from app.core.llm import get_chat_model
 from app.core.prompts import ANSWER_COVERAGE_PROMPT, RAG_ANSWER_PROMPT
 from app.db import repository
@@ -39,6 +39,7 @@ EVAL_SET = ROOT / "tests" / "data" / "eval_ch04.jsonl"
 OUT_DIR = ROOT / "data" / "ch04" / "reports"
 OUT_TXT = OUT_DIR / "rag_eval.txt"
 OUT_JSON = OUT_DIR / "rag_eval.json"
+REWRITE_CACHE = OUT_DIR.parent / "rewrites.json"
 
 _ERRORS: list[str] = []
 _LINES: list[str] = []
@@ -112,13 +113,6 @@ def _coverage_mech(points: list[str], hits: list[dict]) -> float | None:
     return sum(1 for p in points if _norm(p) in text) / len(points)
 
 
-def _answer_coverage_mech(points: list[str], answer: str) -> float | None:
-    if not points:
-        return None
-    text = _norm(answer)
-    return sum(1 for p in points if _norm(p) in text) / len(points)
-
-
 def _evidence(hits: list[dict]) -> str:
     if not hits:
         return "(无证据)"
@@ -141,6 +135,36 @@ async def _try(coro, label: str):
         return None
 
 
+def _load_rewrites() -> dict:
+    try:
+        return json.loads(REWRITE_CACHE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+async def _rewrite_all(queries: list[str]) -> dict:
+    """评估前把口语改写缓存下来,让检索走线上同一套 Query 理解。"""
+    cache = _load_rewrites()
+    missing = sorted({q for q in queries if q not in cache})
+    if missing:
+        sem = asyncio.Semaphore(5)
+
+        async def one(q: str):
+            async with sem:
+                return q, await _try(
+                    query_understanding.understand(q), f"rewrite:{q[:12]}")
+
+        pairs = await asyncio.gather(*(one(q) for q in missing))
+        for q, u in pairs:
+            if u:
+                cache[q] = u
+        OUT_DIR.parent.mkdir(parents=True, exist_ok=True)
+        REWRITE_CACHE.write_text(
+            json.dumps(cache, ensure_ascii=False, indent=1), encoding="utf-8")
+        _log(f"rewrite cache: +{len(missing)} -> {len(cache)}")
+    return cache
+
+
 async def _gen_answer(query: str, hits: list[dict]) -> str:
     msg = await (RAG_ANSWER_PROMPT | get_chat_model()).ainvoke(
         {"query": query, "evidence": _evidence(hits)})
@@ -156,25 +180,23 @@ async def _judge_coverage(points: list[str], answer: str) -> float:
     return len(set(r.covered)) / len(points) if points else 0.0
 
 
-def _is_refusal(answer: str) -> bool:
-    markers = ["没有查到", "未查到", "未找到", "暂无相关", "无相关信息",
-               "无法回答", "不能回答", "建议联系", "转人工", "联系人工",
-               "暂时没有", "不清楚"]
-    return any(m in answer for m in markers)
-
-
-async def _retrieve_all(samples: list[dict], strategies: list[str], client) -> dict:
+async def _retrieve_all(samples: list[dict], strategies: list[str], client,
+                        rewrites: dict) -> dict:
     jobs = [(s, st) for s in samples for st in strategies
             if not (s["bucket"] == D_BUCKET and st != "hybrid_rerank")]
     total = len(jobs)
     out: dict = {}
     _log(f"retrieval start: {total} calls")
     for i, (sample, strategy) in enumerate(jobs, 1):
+        u = rewrites.get(sample["query"]) or {}
+        standard = u.get("standard") or sample["query"]
+        expanded = u.get("expanded") or []
+        bm25_query = standard + (" " + " ".join(expanded) if expanded else "")
         if i <= 3:
             _log(f"  try {i}: {sample['id']} {strategy}")
         hits = await _try(
-            retrieval.search_knowledge(sample["query"], strategy=strategy,
-                                       top_k=TOP_K, client=client),
+            retrieval.search_knowledge(standard, strategy=strategy, top_k=TOP_K,
+                                       client=client, bm25_query=bm25_query),
             f"retrieval:{sample['id']}:{strategy}")
         if i <= 3:
             _log(f"  done {i}: hits={len(hits or [])}")
@@ -187,7 +209,8 @@ async def _retrieve_all(samples: list[dict], strategies: list[str], client) -> d
 
 
 async def _generation(samples: list[dict], d_samples: list[dict],
-                      hits_map: dict, strategies: list[str]) -> dict | None:
+                      hits_map: dict, strategies: list[str],
+                      rewrites: dict) -> dict | None:
     sem = asyncio.Semaphore(GEN_CONCURRENCY)
     progress = [0, len(samples) * len(strategies)]
 
@@ -202,7 +225,9 @@ async def _generation(samples: list[dict], d_samples: list[dict],
             coverage = await _try(_judge_coverage(sample["expect_points"], answer),
                                   f"cover:{sample['id']}:{strategy}")
             if coverage is None:
-                coverage = _answer_coverage_mech(sample["expect_points"], answer)
+                # 裁判失败按「跳过」处理,不回退机械匹配混进同一指标
+                progress[0] += 1
+                return None
             row = {"id": sample["id"], "bucket": sample["bucket"], "strategy": strategy,
                    "coverage": coverage, "answer": answer}
             if strategy == "hybrid_rerank":
@@ -254,26 +279,32 @@ async def _generation(samples: list[dict], d_samples: list[dict],
         "cases": cases,
     }} if faith["hybrid_rerank"] else {}
     return {"answer_coverage": answer_cov, "faithfulness": faith_out,
-            "refusal": await _refusal(d_samples, hits_map), "errors": list(_ERRORS)}
+            "refusal": await _refusal(d_samples, hits_map, rewrites),
+            "errors": list(_ERRORS)}
 
 
-async def _refusal(samples: list[dict], hits_map: dict) -> dict:
-    d_samples = [s for s in samples if s["bucket"] == D_BUCKET]
+async def _refusal(d_samples: list[dict], hits_map: dict, rewrites: dict) -> dict:
+    """D 桶按线上两道闸判拒答:机械闸(无召回/最高分低)+ 生成前自评闸。
+    不再靠答案关键词猜;自评失败计为未判定,不计入分母。"""
     if not d_samples:
-        return {"total": 0, "refused": 0, "rate": None}
-    sem = asyncio.Semaphore(GEN_CONCURRENCY)
-
-    async def one(sample):
-        async with sem:
-            hits = hits_map.get((sample["id"], "hybrid_rerank"), [])
-            answer = await _try(_gen_answer(sample["query"], hits),
-                                f"refusal:{sample['id']}")
-            return answer is not None and _is_refusal(answer)
-
-    results = await asyncio.gather(*(one(s) for s in d_samples))
-    refused = sum(1 for r in results if r)
-    return {"total": len(d_samples), "refused": refused,
-            "rate": round(refused / len(d_samples), 4)}
+        return {"total": 0, "judged": 0, "refused": 0, "rate": None}
+    results = []
+    for sample in d_samples:
+        hits = hits_map.get((sample["id"], "hybrid_rerank"), [])
+        top = hits[0].get("rerank_score", 0.0) if hits else 0.0
+        if not hits or top < settings.rerank_min_score:
+            results.append(True)
+            continue
+        u = rewrites.get(sample["query"]) or {}
+        standard = u.get("standard") or sample["query"]
+        texts = [f"{h['question']} {h['answer']}" for h in hits]
+        chk = await _try(selfcheck.check_sufficient(standard, texts),
+                         f"refusal:{sample['id']}")
+        results.append(None if chk is None else not chk["useful"])
+    judged = [r for r in results if r is not None]
+    refused = sum(1 for r in judged if r)
+    return {"total": len(d_samples), "judged": len(judged), "refused": refused,
+            "rate": round(refused / len(judged), 4) if judged else None}
 
 
 def _write_report(report: dict) -> None:
@@ -300,6 +331,7 @@ async def main() -> None:
     parser.add_argument("--strategies", default=",".join(STRATEGIES))
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--no-generation", action="store_true")
+    parser.add_argument("--no-understanding", action="store_true")
     args = parser.parse_args()
     strategies = [s.strip() for s in args.strategies.split(",") if s.strip()]
 
@@ -328,7 +360,9 @@ async def main() -> None:
     _log(f"ch04 RAG eval @ {datetime.now():%Y-%m-%d %H:%M:%S}")
     _log(f"samples={len(samples)} (D={len(d_samples)}) strategies={strategies} "
          f"kb_count={kb_count} judge={settings.chat_model}")
-    hits_map = await _retrieve_all(all_samples, strategies, client)
+    rewrites = ({} if args.no_understanding
+                else await _rewrite_all([s["query"] for s in all_samples]))
+    hits_map = await _retrieve_all(all_samples, strategies, client, rewrites)
 
     retrieval_d = {}
     coverage_d = {}
@@ -377,7 +411,8 @@ async def main() -> None:
     generation_d = None
     if not args.no_generation:
         try:
-            generation_d = await _generation(samples, d_samples, hits_map, strategies)
+            generation_d = await _generation(samples, d_samples, hits_map,
+                                             strategies, rewrites)
             if generation_d:
                 ac = generation_d["answer_coverage"]
                 for st in strategies:

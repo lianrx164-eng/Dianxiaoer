@@ -4,6 +4,7 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
     "asyncmy>=0.2.9",
+    "cryptography>=50.0.2",
     "fastapi>=0.162.5",
     "jieba>=0.42.1",
     "langchain>=1.5.0",

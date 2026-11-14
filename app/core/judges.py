@@ -1,7 +1,6 @@
 from pydantic import BaseModel, Field
 
-from app.config import settings
-from app.core.llm import get_chat_model, structured_model
+from app.core.llm import get_chat_model, structured_model, thinking_body
 from app.core.prompts import FAITHFULNESS_PROMPT
 
 
@@ -13,9 +12,7 @@ class FaithVerdict(BaseModel):
 def judge_model(temperature: float = 0.0, model=None):
     if model is not None:
         return model
-    extra = ({"thinking": {"type": settings.extract_thinking}}
-             if settings.extract_thinking else None)
-    return get_chat_model(extra_body=extra, temperature=temperature)
+    return get_chat_model(extra_body=thinking_body(), temperature=temperature)
 
 
 async def judge_faithfulness(evidence: str, answer: str,

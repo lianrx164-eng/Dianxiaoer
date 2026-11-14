@@ -18,22 +18,14 @@ class StatusRequest(BaseModel):
     resolution: str | None = None
 
 
-def _load() -> dict | None:
+def load_report() -> dict | None:
     try:
         return json.loads(REPORT_PATH.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
 
 
-def load_report() -> dict | None:
-    return _load()
-
-
 def best_strategy(retrieval: dict) -> dict | None:
-    return _best(retrieval)
-
-
-def _best(retrieval: dict) -> dict | None:
     scored = [(name, cell.get("overall", {}).get("mrr"))
               for name, cell in retrieval.items() if isinstance(cell, dict)]
     scored = [(n, m) for n, m in scored if m is not None]
@@ -72,7 +64,7 @@ async def _hallucination(report: dict) -> dict | None:
 
 @router.get("/api/rag-eval/overview")
 async def overview() -> dict:
-    report = _load()
+    report = load_report()
     job = jobs_core.status("eval-rag") if "eval-rag" in jobs_core.JOBS else {
         "name": "eval-rag", "running": False}
     if report is None:
@@ -89,7 +81,7 @@ async def overview() -> dict:
         "evidence_coverage": report.get("evidence_coverage") or {},
         "generation": generation,
         "generation_done": generation is not None,
-        "best": _best(retrieval),
+        "best": best_strategy(retrieval),
         "hallucination": await _hallucination(report),
         "job": {"name": job["name"], "running": job["running"]},
         "errors": report.get("errors") or [],

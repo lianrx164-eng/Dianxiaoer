@@ -2,6 +2,7 @@ from app.config import settings
 from app.core import embeddings, rerank
 from app.kb import milvus_client
 
+
 def arrange_head_tail(items: list) -> list:
     """最相关放首、次相关放尾,其余按序居中(缓解 lost-in-the-middle)。"""
     if len(items) <= 2:

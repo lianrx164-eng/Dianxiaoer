@@ -80,7 +80,9 @@ BM25 Function(`FunctionType.BM25`,input=`text`,output=`sparse`)必须在 `create
 |---|---|---|
 | `milvus_client`(扩展) | 新 schema + BM25 Function;`hybrid_search([dense_req, bm25_req], RRFRanker())`;`dense_search` / `bm25_search` 单路(评估用);`filter` 元数据过滤参数 | 真实临时 Lite 集合:两路各召回、RRF 融合有序、filter 生效、BM25 命中型号词 |
 | `rerank`(新) | 调百炼 rerank(`qwen3-reranker`),输入 query + docs → 重排序 + 截断 Top-10 | mock 上游:按 relevance 重排、Top-10 截断、空输入安全 |
-| `retrieval.search_knowledge`(重写) | 编排 ①②③④⑤;`strategy` 参数切换四策略(在线与评估复用同一函数) | mock 子步:管线顺序、首尾组装排列正确、strategy 分支正确 |
+| `retrieval.search_knowledge`(重写) | 编排 ②③④(filter + dense/BM25 + RRF + rerank);`strategy` 参数切换四策略(在线与评估复用同一函数) | mock 子步:管线顺序、首尾组装排列正确、strategy 分支正确 |
+
+> 层间分工:① Query 改写与 ⑤ 机械闸在 `query_faq`/agent 层完成;`search_knowledge` 负责 ② 过滤、③ 混合召回、④ 重排。评估脚本先跑同一套 `query_understanding`,把 `standard` 与 `expanded` 传给 `search_knowledge` 的 `bm25_query`,保证「评估的就是线上的」。
 | `query_understanding`(新,Prompt) | 口语→标准问法改写 + 同义词扩展(检索侧) | 纯 Prompt → 标注样例验证(非 TDD) |
 
 **`strategy` 入参**(`vector` / `bm25` / `hybrid` / `hybrid_rerank`)是关键设计:在线默认 `hybrid_rerank`;评估脚本用同一 `search_knowledge` 跑四策略,保证"评估的就是线上的"。同义词扩展只作用于 BM25 检索文本,不改 dense query、不改入库。
@@ -109,7 +111,7 @@ BM25 Function(`FunctionType.BM25`,input=`text`,output=`sparse`)必须在 `create
   - **Faithfulness**:hybrid_rerank 线上管线答案的忠实度(主张是否被证据支撑;A/B/C/E 桶);
   - **拒答率**:D 桶(库外问题应全部拒答)。
   - 裁判用项目已配置的聊天模型(`settings.chat_model`,当前 `deepseek-flash`;Spec 原写 glm-5.2,本机无该模型 key),自评自判偏袒风险为已知取舍、可接受(用户拍板)。
-- **四策略对比**:`vector` / `bm25` / `hybrid` / `hybrid_rerank`,复用 `search_knowledge(strategy=...)`,「评估的就是线上的」。
+- **四策略对比**:`vector` / `bm25` / `hybrid` / `hybrid_rerank`,复用 `search_knowledge(strategy=...)`,「评估的就是线上的」;检索前对每题跑 `query_understanding`,把 `standard` 与同义词扩展传给 `bm25_query`,与线上 `query_faq` 一致。
 - **裁判本身也要校准**:两个裁判跑 `temperature=0`(0.3 下同一份输入重放会给出不同判断,那点抖动会直接写进分数);忠实度提示词写明七类豁免 + 两类真编造 + 六条边界样例;`make judge-check` 拿台账里已处置的个案原样重放,量裁判与人工的一致率,不一致就退出码 1。
 - **健壮性**:生成段每次聊天模型调用带超时 + 失败跳过 + 低并发,单点故障不拖垮整轮;检索段与证据覆盖度不依赖模型、始终产出。
 - **产出**:`scripts/eval_ch04.py` → 策略 × 桶 × 指标分桶报告,跑完落 `data/ch04/reports/` 两份产物,`rag_eval.txt` 是这轮的运行日志给人读,`rag_eval.json` 给页面读。入口 `make eval-rag`。
