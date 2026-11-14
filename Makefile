@@ -1,4 +1,4 @@
-.PHONY: dev test eval seed eval-agent kb-preview kb-build kb-vectorize kb-mine kb-reset eval-retrieval seed-conv eval-mining smoke-rag eval-rag eval-check judge-check eval-rewrite smoke-graph eval-intent eval-ch05 smoke-interrupt eval-coref eval-expand eval-ch06 eval-ch07 smoke-ch07 smoke-ch07-demo
+.PHONY: dev test eval seed eval-agent kb-preview kb-build kb-vectorize kb-mine kb-reset eval-retrieval seed-conv eval-mining smoke-rag eval-rag eval-check judge-check eval-rewrite smoke-graph eval-intent eval-ch05 smoke-interrupt eval-coref eval-expand eval-ch06 eval-ch07 smoke-ch07 smoke-ch07-demo mcp-up mcp-down
 
 dev:
 	./scripts/dev.sh
@@ -98,3 +98,15 @@ smoke-ch07:
 # ch07 演示配置 30 轮级联(层1降级 → 摘要落库;25 轮层2约 1515<1695,30 轮过阈值)
 smoke-ch07-demo:
 	MODEL_CONTEXT_WINDOW=18000 MAX_OUTPUT_TOKENS=2000 MAX_USER_INPUT_TOKENS=2000 MAX_AGENT_STEPS=3 TOOL_RESULT_MAX_TOKENS=1200 RERANK_TOP_K=5 CHECKPOINTER_DB_PATH=data/ch05_checkpoints_smoke.sqlite PYTHONUTF8=1 uv run python -m scripts.smoke_ch07 demo
+
+# ch08: 两台业务 MCP Server 起停(独立进程,Streamable HTTP :8101/:8102)
+mcp-up:
+	@mkdir -p log data
+	@nohup uv run python mcp_servers/logistics_server.py  > log/mcp-logistics.log 2>&1 & echo $$! > data/mcp-logistics.pid
+	@nohup uv run python mcp_servers/aftersales_server.py > log/mcp-aftersales.log 2>&1 & echo $$! > data/mcp-aftersales.pid
+	@sleep 1 && echo "MCP Servers 已拉起: logistics=:8101 aftersales=:8102"
+
+mcp-down:
+	-@kill `cat data/mcp-logistics.pid 2>/dev/null` 2>/dev/null; rm -f data/mcp-logistics.pid
+	-@kill `cat data/mcp-aftersales.pid 2>/dev/null` 2>/dev/null; rm -f data/mcp-aftersales.pid
+	@echo "MCP Servers 已停"

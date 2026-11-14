@@ -54,11 +54,22 @@ def _summarize(content: str) -> str:
     return content if len(content) <= _SUMMARY_LIMIT else content[:_SUMMARY_LIMIT] + "…(截断)"
 
 
-def _format_content(spec: ToolSpec, result) -> str:
-    """结果格式化:MCP 工具常返回 JSON 文本或 (content, artifact) 元组,先归一成 dict;
-    format_result 钩子挑字段/枚举翻人话;统一 ensure_ascii=False 序列化(中文不转义)。"""
+def _flatten_content(result):
+    """adapters 0.3.x 的工具调用返回 MCP content block 列表([{type,text,id}...]),
+    先拼成文本再按 JSON 解析;普通 tuple/str/dict 原样返回。"""
     if isinstance(result, tuple):
         result = result[0]
+    if isinstance(result, list) and all(
+            isinstance(b, dict) and "type" in b for b in result):
+        texts = [b.get("text", "") for b in result if b.get("type") == "text"]
+        result = "\n".join(t for t in texts if t)
+    return result
+
+
+def _format_content(spec: ToolSpec, result) -> str:
+    """结果格式化:先归一 MCP content block / tuple / JSON 文本;
+    format_result 钩子挑字段/枚举翻人话;统一 ensure_ascii=False 序列化(中文不转义)。"""
+    result = _flatten_content(result)
     if isinstance(result, str):
         try:
             result = json.loads(result)

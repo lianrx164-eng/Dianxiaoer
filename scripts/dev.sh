@@ -13,4 +13,6 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
+make mcp-up   # ch08: 物流/售后 MCP Server(独立进程)
+
 uv run uvicorn app.main:app --port "${PORT:-8000}"

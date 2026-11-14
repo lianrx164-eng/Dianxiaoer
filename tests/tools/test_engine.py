@@ -164,6 +164,23 @@ async def test_format_result_hook_translates_enum(audits):
     assert audits[-1]["tool_source"] == "mcp"
 
 
+async def test_format_handles_mcp_content_blocks(audits):
+    """adapters 0.3.x 返回 [{type:text,text:<json>,id:<随机>}];应解成 dict 并丢掉内部 id。"""
+    async def ok(_):
+        return [{"type": "text", "id": "lc-random",
+                 "text": '{"tracking_no": "SF1", "status_code": "IN_TRANSIT"}'}]
+
+    spec = _spec("query_logistics", source="mcp", tool=_tool(ok, "query_logistics"),
+                 schema={"type": "object", "properties": {"tracking_no": {"type": "string"}},
+                         "required": ["tracking_no"]})
+    run = await engine.execute_tool_call(
+        {"name": "query_logistics", "args": {"tracking_no": "SF1"}, "id": "c1"},
+        1, {"query_logistics": spec})
+    assert run.ok is True
+    assert "IN_TRANSIT" in run.tool_message.content
+    assert "lc-random" not in run.tool_message.content
+
+
 async def test_audit_failure_never_blocks_execution(monkeypatch):
     async def audit_boom(**kw):
         raise RuntimeError("审计库挂了")
