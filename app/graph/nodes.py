@@ -104,6 +104,11 @@ async def fallback_reply(state) -> dict:
         retrieved_chunks=snapshot,
     )
     return {"answer": FALLBACK_REPLY,
+            "suggested_actions": [
+                {"type": "transfer_human"},
+                {"type": "create_ticket",
+                 "draft": {"description": _user_text(state), "ticket_type": "咨询"}},
+            ],
             "trace": trace_of(state, handler="fallback")}
 
 

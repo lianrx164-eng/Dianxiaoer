@@ -54,6 +54,8 @@ async def test_fallback_reply_persists_source_and_snapshot(monkeypatch):
     assert "0.41" in recorded["reason"]
     assert "缺关键信息" in recorded["reason"]
     assert out["answer"] == nodes.FALLBACK_REPLY
+    assert [a["type"] for a in out["suggested_actions"]] == ["transfer_human", "create_ticket"]
+    assert out["suggested_actions"][1]["draft"]["ticket_type"] == "咨询"
 
 
 async def test_fallback_reply_defaults_source_and_null_snapshot(monkeypatch):
