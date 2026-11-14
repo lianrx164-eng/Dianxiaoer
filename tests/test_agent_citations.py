@@ -1,77 +1,56 @@
-import json
-
+"""知识路:forced_rag 的编号证据经 SSE 事件送到前端。"""
 import pytest
 from langchain_core.messages import AIMessage
-from sqlalchemy import text
+from langgraph.checkpoint.memory import InMemorySaver
 
-from app.core import agent
-from fake_model import FakeModel
-
-
-class _FakeToolRun:
-    def __init__(self, name, payload, cid="tc1", ok=True):
-        self.name = name
-        self.ok = ok
-        self.tool_call_id = cid
-
-        class _M:
-            content = json.dumps(payload, ensure_ascii=False)
-        self.tool_message = _M()
+from app.graph import nodes, runtime
+from app.graph.build import build_graph
 
 
-def test_extract_faq_citations():
-    runs = [_FakeToolRun("query_faq", {
-        "sufficient": True, "evidence": "[1] x",
-        "citations": [{"n": 1, "id": 5, "section_path": "运费政策",
-                       "question": "运费", "answer": "满99包邮",
-                       "content_type": "faq"}]})]
-    faq = agent._faq_result(runs)
-    assert faq["sufficient"] is True and faq["citations"][0]["id"] == 5
+def _aval(value):
+    async def _f(*a, **k):
+        return value
+    return _f
 
 
-def test_extract_faq_none_when_absent():
-    runs = [_FakeToolRun("query_order", {"x": 1})]
-    assert agent._faq_result(runs) is None
+@pytest.fixture(autouse=True)
+def _repo(monkeypatch):
+    async def fake_create(uid):
+        return 7
+
+    async def fake_append(*a, **k):
+        return 1
+
+    monkeypatch.setattr(runtime.repository, "create_conversation", fake_create)
+    monkeypatch.setattr(runtime.repository, "append_message", fake_append)
 
 
-@pytest.mark.asyncio
-async def test_stream_emits_citations(db_session_factory, db_clean, monkeypatch):
-    first = AIMessage(content="", tool_calls=[
-        {"name": "query_faq", "args": {"keyword": "邮费"}, "id": "c1"}])
-    model = FakeModel([first], stream_tokens=["满99包邮[1]。"])
-    runs = [_FakeToolRun("query_faq", {
-        "sufficient": True, "evidence": "[1] 运费 满99包邮",
-        "citations": [{"n": 1, "id": 5, "section_path": "运费政策",
-                       "question": "运费", "answer": "满99包邮",
-                       "content_type": "faq"}]})]
+async def _events(monkeypatch):
+    citations = [{"n": 1, "id": 1, "section_path": "运费政策",
+                  "question": "运费怎么算", "answer": "满99包邮", "content_type": "faq"}]
+    monkeypatch.setattr(nodes, "classify_intent", _aval(
+        {"intent": "商品咨询", "route": "knowledge", "trace": {"route": "knowledge"}}))
+    monkeypatch.setattr(nodes, "forced_rag", _aval(
+        {"evidence_strong": True, "evidence": "[1] 运费怎么算: 满99包邮",
+         "citations": citations,
+         "trace": {"forced_rag": True, "evidence_top": 0.9}}))
 
-    async def fake_exec(cid, tcs):
-        return runs
+    async def fake_agent(state, config=None):
+        return {"messages": [AIMessage("满99包邮[1]")], "steps": 1, "tokens_used": 5}
 
-    monkeypatch.setattr(agent, "_execute_tools", fake_exec)
-    events = [e async for e in agent.stream_agent_turn("u1", "邮费是多少", None, model=model)]
+    monkeypatch.setattr(nodes, "agent_llm", fake_agent)
+    monkeypatch.setattr(runtime, "get_graph",
+                        lambda: build_graph(checkpointer=InMemorySaver()))
+    return [e async for e in runtime.stream_turn("u1", "邮费是多少", None)]
+
+
+async def test_stream_emits_citations_for_knowledge_route(monkeypatch):
+    events = await _events(monkeypatch)
     cites = [e for e in events if e["type"] == "citations"]
     assert cites and cites[0]["items"][0]["section_path"] == "运费政策"
 
 
-@pytest.mark.asyncio
-async def test_stream_low_conf_lands_in_pool(db_session_factory, db_clean, monkeypatch):
-    first = AIMessage(content="", tool_calls=[
-        {"name": "query_faq", "args": {"keyword": "火星车"}, "id": "c1"}])
-    model = FakeModel([first], stream_tokens=["暂时没有查到相关信息。"])
-    runs = [_FakeToolRun("query_faq", {
-        "sufficient": False, "source": "retrieval_low_conf",
-        "reason": "检索证据不足(top=0.000)", "citations": []})]
-
-    async def fake_exec(cid, tcs):
-        return runs
-
-    monkeypatch.setattr(agent, "_execute_tools", fake_exec)
-    events = [e async for e in agent.stream_agent_turn("u1", "你们卖火星车吗", None, model=model)]
-    assert all(e["type"] != "citations" for e in events)
-    assert any("证据不足" in m.content for m in model.astream_messages[0])
-
-    async with db_session_factory() as s:
-        row = (await s.execute(text(
-            "SELECT source, raw_question FROM low_confidence_questions"))).first()
-    assert row.source == "retrieval_low_conf" and row.raw_question == "你们卖火星车吗"
+async def test_answer_delta_carries_citation_marker(monkeypatch):
+    events = await _events(monkeypatch)
+    answer = "".join(e["text"] for e in events if e["type"] == "delta")
+    assert answer == "满99包邮[1]"

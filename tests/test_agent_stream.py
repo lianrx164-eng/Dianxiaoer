@@ -1,90 +1,80 @@
-from langchain_core.messages import AIMessage
+"""流式入口:事件映射、create_ticket 拦截为提议、会话不存在。"""
+import pytest
+from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.checkpoint.memory import InMemorySaver
 
-from app.core import agent
-from app.db import repository as repo
-from fake_model import FakeModel
+from app.graph import nodes, runtime
+from app.graph.build import build_graph
+
+
+def _aval(value):
+    async def _f(*a, **k):
+        return value
+    return _f
+
+
+@pytest.fixture(autouse=True)
+def _repo(monkeypatch):
+    async def fake_create(uid):
+        return 7
+
+    async def fake_append(*a, **k):
+        return 1
+
+    monkeypatch.setattr(runtime.repository, "create_conversation", fake_create)
+    monkeypatch.setattr(runtime.repository, "append_message", fake_append)
 
 
 async def _collect(agen):
-    return [ev async for ev in agen]
+    return [e async for e in agen]
 
 
-async def test_stream_with_tool_emits_tool_delta_done(db_session_factory, db_clean):
-    first = AIMessage(content="", tool_calls=[
-        {"name": "query_logistics", "args": {"order_id": "1001"}, "id": "c1"}])
-    model = FakeModel([first], stream_tokens=["您的订单", "正在运输中。"])
-    events = await _collect(agent.stream_agent_turn("u1", "订单 1001 到哪了", None, model=model))
+async def test_stream_chitchat_emits_fixed_reply(monkeypatch):
+    monkeypatch.setattr(nodes, "classify_intent", _aval(
+        {"intent": "闲聊", "route": "chitchat", "trace": {"route": "chitchat"}}))
+    monkeypatch.setattr(runtime, "get_graph",
+                        lambda: build_graph(checkpointer=InMemorySaver()))
 
-    assert events[0] == {"type": "tool", "name": "query_logistics"}
-    deltas = [e["text"] for e in events if e["type"] == "delta"]
-    assert "".join(deltas) == "您的订单正在运输中。"
-    assert events[-1]["type"] == "done" and isinstance(events[-1]["conversation_id"], int)
-    assert model.bind_calls == 1
-    assert model.astream_messages, "收敛应走 astream"
-
-    msgs = await repo.list_messages(events[-1]["conversation_id"])
-    assert [m.role for m in msgs] == ["user", "assistant", "tool", "assistant"]
-    assert msgs[-1].content == "您的订单正在运输中。"
+    events = await _collect(runtime.stream_turn("u1", "你好", None))
+    assert events[0] == {"type": "delta", "text": nodes.CHITCHAT_REPLY}
+    assert events[-1]["type"] == "done" and events[-1]["conversation_id"] == 7
 
 
-async def test_stream_without_tool_yields_direct_delta(db_session_factory, db_clean):
-    model = FakeModel([AIMessage(content="你好,有什么可以帮您?")])
-    events = await _collect(agent.stream_agent_turn("u1", "你好", None, model=model))
+async def test_stream_agent_create_ticket_becomes_action_not_write(monkeypatch):
+    monkeypatch.setattr(nodes, "classify_intent", _aval(
+        {"intent": "售后", "route": "business", "trace": {"route": "business"}}))
+    calls = {"n": 0}
 
-    assert all(e["type"] != "tool" for e in events)
-    deltas = [e["text"] for e in events if e["type"] == "delta"]
-    assert "".join(deltas) == "你好,有什么可以帮您?"
-    assert events[-1]["type"] == "done"
-    assert model.astream_messages == []                # 无工具不走收敛流式
+    async def fake_agent(state, config=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return {"messages": [AIMessage("", tool_calls=[
+                {"name": "create_ticket",
+                 "args": {"description": "屏幕碎了", "ticket_type": "售后"}, "id": "t1"}])],
+                "steps": 1, "tokens_used": 5}
+        return {"messages": [AIMessage("已为您准备好工单选项,可点击下方按钮提交")],
+                "steps": 2, "tokens_used": 10}
 
-    msgs = await repo.list_messages(events[-1]["conversation_id"])
-    assert [m.role for m in msgs] == ["user", "assistant"]
+    async def fail_write(*a, **k):
+        raise AssertionError("拦截为提议时不应写 tickets")
 
+    monkeypatch.setattr(nodes, "agent_llm", fake_agent)
+    monkeypatch.setattr(nodes.repository, "create_ticket", fail_write)
+    monkeypatch.setattr(runtime, "get_graph",
+                        lambda: build_graph(checkpointer=InMemorySaver()))
 
-async def test_stream_new_conversation_returns_new_id(db_session_factory, db_clean):
-    model = FakeModel([AIMessage(content="嗨")])
-    events = await _collect(agent.stream_agent_turn("u1", "hi", None, model=model))
-    cid = events[-1]["conversation_id"]
-    assert isinstance(cid, int)
-    assert await repo.get_conversation(cid) is not None
-
-
-async def test_stream_unknown_conversation_raises(db_session_factory, db_clean):
-    model = FakeModel([AIMessage(content="hi")])
-    try:
-        await _collect(agent.stream_agent_turn("u1", "hi", 999999, model=model))
-        assert False, "应抛 ConversationNotFound"
-    except agent.ConversationNotFound:
-        pass
-
-
-async def test_stream_convergence_carries_single_round_guard(db_session_factory, db_clean):
-    first = AIMessage(content="", tool_calls=[
-        {"name": "query_faq", "args": {"keyword": "邮费"}, "id": "c1"}])
-    model = FakeModel([first], stream_tokens=["未找到相关信息。"])
-    await _collect(agent.stream_agent_turn("u1", "邮费是多少", None, model=model))
-    converged = model.astream_messages[0]
-    assert "不要再" in converged[-1].content
-    assert converged[-1].type == "system"
+    events = await _collect(runtime.stream_turn("u1", "屏幕碎了要售后", None))
+    actions = [e for e in events if e["type"] == "actions"]
+    assert actions and actions[0]["items"][0]["type"] == "create_ticket"
+    assert actions[0]["items"][0]["draft"]["description"] == "屏幕碎了"
+    assert not [e for e in events if e["type"] == "tool"]   # create_ticket 不出工具徽章
+    assert any(e["type"] == "delta" and "工单选项" in e["text"] for e in events)
 
 
-async def test_tool_frame_emitted_before_tool_executes(db_session_factory, db_clean, monkeypatch):
-    first = AIMessage(content="", tool_calls=[
-        {"name": "query_logistics", "args": {"order_id": "1001"}, "id": "c1"}])
-    model = FakeModel([first], stream_tokens=["完成"])
-    executed = {"done": False}
-    real_exec = agent.execute_tool_call
+async def test_stream_unknown_conversation_raises(monkeypatch):
+    async def fake_get(cid):
+        return None
 
-    async def spy(tc, cid):
-        executed["done"] = True
-        return await real_exec(tc, cid)
-
-    monkeypatch.setattr(agent, "execute_tool_call", spy)
-
-    agen = agent.stream_agent_turn("u1", "查物流", None, model=model)
-    first_ev = await agen.__anext__()
-    assert first_ev == {"type": "tool", "name": "query_logistics"}
-    assert executed["done"] is False          # 状态帧必须先于工具执行
-    async for _ in agen:
-        pass
-    assert executed["done"] is True
+    monkeypatch.setattr(runtime.repository, "get_conversation", fake_get)
+    with pytest.raises(runtime.ConversationNotFound):
+        await _collect(runtime.stream_turn("u1", "hi", 999999))

@@ -1,95 +1,120 @@
-from langchain_core.messages import AIMessage
-from sqlalchemy import func, select
+"""图级编排测试:确定性出口、知识路证据闸、业务路与步数封顶。"""
+import pytest
+from langchain_core.messages import AIMessage, HumanMessage
+from langgraph.checkpoint.memory import InMemorySaver
 
-from app.core import agent
-from app.db import repository as repo
-from app.db.models import Conversation, Message
-from fake_model import FakeModel
-
-
-async def test_no_tool_calls_returns_direct_answer(db_session_factory, db_clean):
-    model = FakeModel([AIMessage(content="你好,喵~ 有什么可以帮您?")])
-    res = await agent.run_agent_turn("u1", "你好", None, model=model)
-    assert res.answer.startswith("你好") and res.tool_calls == []
-    msgs = await repo.list_messages(res.conversation_id)
-    assert [m.role for m in msgs] == ["user", "assistant"]
+from app.config import settings
+from app.graph import nodes
+from app.graph.build import build_graph
 
 
-async def test_tool_call_flow_executes_and_converges(db_session_factory, db_clean):
-    first = AIMessage(content="", tool_calls=[
-        {"name": "query_logistics", "args": {"order_id": "1001"}, "id": "c1"}])
-    model = FakeModel([first, AIMessage(content="您的订单 1001 正在运输中。")])
-    res = await agent.run_agent_turn("u1", "订单 1001 到哪了", None, model=model)
-    assert res.answer == "您的订单 1001 正在运输中。"
-    assert res.tool_calls[0]["name"] == "query_logistics"
-    assert res.tool_runs[0].ok is True
-    assert model.bind_calls == 1                       # 收敛不 bind
-    msgs = await repo.list_messages(res.conversation_id)
-    assert [m.role for m in msgs] == ["user", "assistant", "tool", "assistant"]
-    assert msgs[2].tool_call_id == "c1"
+def _aval(value):
+    async def _f(*a, **k):
+        return value
+    return _f
 
 
-async def test_continue_conversation_replays_only_final_answers(db_session_factory, db_clean):
-    m1 = FakeModel([
-        AIMessage(content="我帮您查一下:", tool_calls=[
-            {"name": "query_logistics", "args": {"order_id": "1001"}, "id": "c1"}]),
-        AIMessage(content="订单 1001 已揽件。")])
-    cid = (await agent.run_agent_turn("u1", "订单1001到哪了", None, model=m1)).conversation_id
-    m2 = FakeModel([AIMessage(content="还有什么可以帮您?")])
-    await agent.run_agent_turn("u1", "谢谢", cid, model=m2)
-    ai_contents = [m.content for m in m2.invoke_messages[0] if isinstance(m, AIMessage)]
-    assert "订单 1001 已揽件。" in ai_contents            # 最终答回放
-    assert "我帮您查一下:" not in ai_contents             # tool-calling preamble 不跨轮
+def _graph(thread="t1"):
+    return build_graph(checkpointer=InMemorySaver()), {"configurable": {"thread_id": thread}}
 
 
-async def test_unknown_conversation_raises(db_session_factory, db_clean):
-    model = FakeModel([AIMessage(content="hi")])
-    try:
-        await agent.run_agent_turn("u1", "hi", 999999, model=model)
-        assert False, "应抛 ConversationNotFound"
-    except agent.ConversationNotFound:
-        pass
+def _input(text="q"):
+    return {"messages": [HumanMessage(text)], "conversation_id": 1,
+            "steps": 0, "tokens_used": 0, "trace": {}}
 
 
-async def test_convergence_call_carries_single_round_guard(db_session_factory, db_clean):
-    first = AIMessage(content="", tool_calls=[
-        {"name": "query_faq", "args": {"keyword": "邮费"}, "id": "c1"}])
-    model = FakeModel([first, AIMessage(content="未找到相关信息,建议联系人工。")])
-    await agent.run_agent_turn("u1", "邮费是多少", None, model=model)
-    converged = model.invoke_messages[1]
-    # 收敛调用必须带「不要再调用工具」的收口指令:
-    # DeepSeek 在无 tools 的收敛步想再调工具时,会把调用当特殊标记文本吐出来
-    assert "不要再" in converged[-1].content
-    assert converged[-1].type == "system"
+@pytest.fixture(autouse=True)
+def _quiet_db(monkeypatch):
+    async def fake_append(*a, **k):
+        return 1
+
+    async def fake_insert(*a, **k):
+        return 1
+
+    monkeypatch.setattr(nodes.repository, "append_message", fake_append)
+    monkeypatch.setattr(nodes.repository, "insert_low_confidence", fake_insert)
 
 
-class BoomModel(FakeModel):
-    async def ainvoke(self, messages):
-        raise RuntimeError("upstream boom")
+async def test_chitchat_route_returns_fixed_reply(monkeypatch):
+    monkeypatch.setattr(nodes, "classify_intent", _aval(
+        {"intent": "闲聊", "route": "chitchat", "trace": {"intent": "闲聊", "route": "chitchat"}}))
+    g, config = _graph()
+    final = await g.ainvoke(_input("你好"), config)
+    assert final["answer"] == nodes.CHITCHAT_REPLY
+    assert final["route"] == "chitchat"
 
 
-async def test_upstream_failure_leaves_no_partial_rows(db_session_factory, db_clean):
-    # turn1 落 user 之前就失败:不能留下半截 user 行或孤儿会话,
-    # 否则用户重试同一句会在历史里出现两遍
-    model = BoomModel([])
-    try:
-        await agent.run_agent_turn("u1", "hi", None, model=model)
-        assert False, "上游异常应向上抛"
-    except RuntimeError:
-        pass
-    async with db_session_factory() as s:
-        msg_count = (await s.execute(select(func.count()).select_from(Message))).scalar_one()
-        conv_count = (await s.execute(select(func.count()).select_from(Conversation))).scalar_one()
-    assert msg_count == 0
-    assert conv_count == 0
+async def test_business_route_goes_straight_to_agent(monkeypatch):
+    monkeypatch.setattr(nodes, "classify_intent", _aval(
+        {"intent": "订单", "route": "business", "trace": {"route": "business"}}))
+
+    async def fake_agent(state, config=None):
+        return {"messages": [AIMessage("订单已发货")], "steps": 1, "tokens_used": 5}
+
+    monkeypatch.setattr(nodes, "agent_llm", fake_agent)
+    g, config = _graph()
+    final = await g.ainvoke(_input("订单1001"), config)
+    assert nodes.resolve_answer(final) == "订单已发货"
+    assert "forced_rag" not in final.get("trace", {})
 
 
-async def test_retry_after_failure_has_single_user_row(db_session_factory, db_clean):
-    try:
-        await agent.run_agent_turn("u1", "hi", None, model=BoomModel([]))
-    except RuntimeError:
-        pass
-    res = await agent.run_agent_turn(
-        "u1", "hi", None, model=FakeModel([AIMessage(content="你好")]))
-    msgs = await repo.list_messages(res.conversation_id)
-    assert [m.role for m in msgs] == ["user", "assistant"]   # 重试不产生重复 user 行
+async def test_knowledge_weak_evidence_falls_back_and_pools(monkeypatch):
+    calls = {}
+
+    async def fake_insert(conversation_id, raw_question, source, reason):
+        calls.update(cid=conversation_id, source=source)
+        return 1
+
+    monkeypatch.setattr(nodes.repository, "insert_low_confidence", fake_insert)
+    monkeypatch.setattr(nodes, "classify_intent", _aval(
+        {"intent": "商品咨询", "route": "knowledge", "trace": {"route": "knowledge"}}))
+    monkeypatch.setattr(nodes, "forced_rag", _aval(
+        {"evidence_strong": False,
+         "trace": {"forced_rag": True, "gate": "retrieval_low_conf", "evidence_top": 0.1}}))
+
+    async def boom(state, config=None):
+        raise AssertionError("证据弱不应进 Agent")
+
+    monkeypatch.setattr(nodes, "agent_llm", boom)
+    g, config = _graph()
+    final = await g.ainvoke(_input("怎么注销账号"), config)
+    assert final["answer"] == nodes.FALLBACK_REPLY
+    assert calls == {"cid": 1, "source": "retrieval_low_conf"}
+
+
+async def test_knowledge_strong_evidence_reaches_agent_with_citations(monkeypatch):
+    citations = [{"n": 1, "id": 1, "section_path": "退货", "question": "能退吗", "answer": "7天"}]
+    monkeypatch.setattr(nodes, "classify_intent", _aval(
+        {"intent": "退款退货", "route": "knowledge", "trace": {"route": "knowledge"}}))
+    monkeypatch.setattr(nodes, "forced_rag", _aval(
+        {"evidence_strong": True, "evidence": "[1] 能退吗: 7天", "citations": citations,
+         "trace": {"forced_rag": True, "evidence_top": 0.9}}))
+
+    async def fake_agent(state, config=None):
+        assert "已检索到的知识证据" in nodes._agent_messages(state)[0].content
+        return {"messages": [AIMessage("7天无理由[1]")], "steps": 1, "tokens_used": 5}
+
+    monkeypatch.setattr(nodes, "agent_llm", fake_agent)
+    g, config = _graph()
+    final = await g.ainvoke(_input("能退吗"), config)
+    assert final["citations"] == citations
+    assert nodes.resolve_answer(final) == "7天无理由[1]"
+
+
+async def test_step_cap_aborts_pending_tools(monkeypatch):
+    monkeypatch.setattr(settings, "max_agent_steps", 1)
+    monkeypatch.setattr(nodes, "classify_intent", _aval(
+        {"intent": "订单", "route": "business", "trace": {"route": "business"}}))
+
+    async def fake_agent(state, config=None):
+        return {"messages": [AIMessage("", tool_calls=[
+            {"name": "query_order", "args": {"order_id": "1"}, "id": "c1"}])],
+            "steps": 1, "tokens_used": 5}
+
+    monkeypatch.setattr(nodes, "agent_llm", fake_agent)
+    g, config = _graph()
+    final = await g.ainvoke(_input("查订单"), config)
+    assert final["answer"] == nodes.FALLBACK_REPLY
+    assert final["trace"]["cap"] is True
+    tool_msgs = [m for m in final["messages"] if getattr(m, "tool_call_id", None) == "c1"]
+    assert tool_msgs and "已中止" in tool_msgs[0].content
