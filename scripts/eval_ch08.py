@@ -125,7 +125,8 @@ async def main():
 
         # 验收 1(演示物料已放入时):新工具只靠丢文件即注册
         if pathlib.Path("app/tools/builtin/promotions.py").exists():
-            r5 = await agent(c, "最近有什么优惠活动")
+            # 用「订单」措辞走 business 路由,才看得到动态工具;纯「优惠活动」会被知识路接走
+            r5 = await agent(c, "订单1001有没有优惠活动")
             names = {tc["name"] for tc in r5.get("tool_calls", [])}
             check("1 promotions 丢文件即注册并被调用",
                   "query_promotions" in names, {"tools": sorted(names)})

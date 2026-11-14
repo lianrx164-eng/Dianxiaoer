@@ -6,6 +6,8 @@ __pycache__/
 # Milvus Lite 本地库文件 / LangGraph checkpointer
 data/*.db*
 data/*.sqlite*
+# MCP Server 起停 pid
+data/*.pid
 # 临时探测脚本
 .scratch/
 # 页面作业日志

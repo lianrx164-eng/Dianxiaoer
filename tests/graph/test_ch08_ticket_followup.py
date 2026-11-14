@@ -23,6 +23,17 @@ async def test_sticky_flag_routes_without_classifier(monkeypatch):
     assert called == []
 
 
+async def test_human_intent_sets_next_turn_sticky(monkeypatch):
+    async def fake_classify(q, h=""):
+        return {"intent": "人工", "confidence": 0.97}
+
+    monkeypatch.setattr(nodes.intent_mod, "classify", fake_classify)
+    out = await nodes.classify_intent({
+        "messages": [HumanMessage("帮我建个工单")],
+        "resolved_query": "帮我建个工单"})
+    assert out["route"] == "business" and out["ticket_followup"] is True
+
+
 async def test_sticky_flag_cleared_after_one_turn(monkeypatch):
     async def fake_classify(q, h=""):
         return {"intent": "售后", "confidence": 0.92}
@@ -32,6 +43,7 @@ async def test_sticky_flag_cleared_after_one_turn(monkeypatch):
         "messages": [HumanMessage("那换个问题")],
         "resolved_query": "那换个问题", "ticket_followup": False})
     assert out["route"] == "refund_flow"      # 恢复正常分流
+    assert out["ticket_followup"] is False
 
 
 class _FollowupModel:

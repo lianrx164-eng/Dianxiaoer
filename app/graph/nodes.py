@@ -140,6 +140,9 @@ async def classify_intent(state) -> dict:
     intent, conf = r["intent"], r["confidence"]
     route = INTENT_TO_ROUTE.get(intent, "business")
     return {"intent": intent, "intent_confidence": conf, "route": route,
+            # 人工意图的下一轮直接粘一轮 business:模型这一轮可能只是口头追问、
+            # 没有发 create_ticket,不能靠 agent_tools 的失败调用来置标记。
+            "ticket_followup": intent == "人工",
             "trace": trace_of(state, intent=intent,
                               intent_confidence=conf, route=route)}
 

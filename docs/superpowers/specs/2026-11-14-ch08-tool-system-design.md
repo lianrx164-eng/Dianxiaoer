@@ -130,7 +130,7 @@ async def execute_tool_call(
 
 1. 取 `last.tool_calls`,先 `specs = {s.name: s for s in await registry.get_all_specs()}`。
 2. 若有 `create_ticket` 且参数通过 `engine.validate_args`:在**执行任何工具之前** `interrupt({"type": "confirm_ticket", "preview": {"ticket_type": ..., "description": ...}})`。interrupt 前只做纯计算,resume 时节点从头重跑安全(照 `fetch_order` 范式)。
-3. 参数不通过 → 不 interrupt,交引擎按「校验拦下」回灌并落审计,模型自然向用户追问;同时 `agent_tools` 置 `ticket_followup=True`。下一轮 `classify_intent` 见到该标记就**零模型直接判「人工」、路由 business**,并在同一次返回里把标记清掉——只粘一轮。用户若突然换话题,这一轮也走通用 Agent(它本来就能答物流/订单/商品问题),下一轮恢复正常分流。
+3. 参数不通过 → 不 interrupt,交引擎按「校验拦下」回灌并落审计,模型自然向用户追问。`classify_intent` 判出「人工」时置 `ticket_followup=True`(下一轮粘一轮 business),`agent_tools` 在校验失败时也置 True 作兜底——模型有时只口头追问、根本不发 `create_ticket`,不能只靠失败调用来置标记。下一轮 `classify_intent` 见到该标记就**零模型直接判「人工」、路由 business**,并在同一次返回里把标记清掉——只粘一轮。用户若突然换话题,这一轮也走通用 Agent(它本来就能答物流/订单/商品问题),下一轮恢复正常分流。
 4. resume 值:`{"confirmed": true}` → 引擎带 `confirmed=True` 真执行,`ToolMessage` 带工单号;`{"confirmed": false}` → 引擎带 `confirmed=False` + 明确 `deny_note`,落「权限拒绝」审计,回灌「用户取消了本次建工单,请不要再发起」。resume 值不是 dict 时按取消处理。
 5. 一轮多个 `create_ticket`:只处理第一个;其余调用也过引擎、按未确认写拒绝并落审计,回灌「一次只处理一个建工单请求」。
 6. 其余工具(`query_order`、MCP 工具等)在 interrupt 之后照常走引擎;`submit_refund` 的 ch06 拦截保持原样(转前端退款表单,不经引擎、不落审计——它只是动作提议,不执行)。
@@ -153,7 +153,7 @@ async def execute_tool_call(
 - 意图 prompt 改九选一,新增边界与样例:明确要求建工单、转人工客服、让人工跟进 → 人工,哪怕同时带着不满;单纯抱怨仍归投诉;「人工客服电话多少」这类问规则的问题仍归商品咨询(问的是信息,不是要求转接)。
 - 路由表:`"人工": "business"`。
 - 评估集新增 2 条(如「帮我建个工单」「我要转人工跟进」→ 人工);原有 18 条零回归,重跑 `eval_intent` 记录结果。
-- 建单追问后的补充句(如「猫砂盆漏电」)单看会被判成售后/商品咨询,靠 §4.6 的一轮粘滞状态兜底:状态字段 `ticket_followup` 存 State,`classify_intent` 读到即直接判「人工」并清零,不再调分类模型。
+- 建单追问后的补充句(如「猫砂盆漏电」)单看会被判成售后/商品咨询,靠 §4.6 的一轮粘滞状态兜底:`classify_intent` 判出「人工」即置 `ticket_followup`,下一轮直接判「人工」并清零,不再调分类模型;校验失败路径也置同一标记。
 - 已知边界:分类器仍是模型判断,可能把极端说法判偏;不额外加关键词后门(用户已选方案 A)。
 
 ### 4.8 前端(`app/static/index.html`,Vibe Coding)
