@@ -73,9 +73,9 @@ def test_agent_endpoint_502_on_upstream_error(monkeypatch):
 def test_agent_endpoint_surfaces_interrupt(monkeypatch):
     async def fake_run(*a, **k):
         return {"conversation_id": 3, "state": _fake_state(),
-                "interrupt": [{"order_id": "1001"}]}
+                "interrupt": {"type": "select_order", "orders": [{"order_id": "1001"}]}}
 
     monkeypatch.setattr(runtime, "run_turn", fake_run)
     r = TestClient(app).post("/api/agent", json={"user_id": "u1", "message": "我要退款"})
     assert r.status_code == 200
-    assert r.json()["interrupt"] == [{"order_id": "1001"}]
+    assert r.json()["interrupt"] == {"type": "select_order", "orders": [{"order_id": "1001"}]}

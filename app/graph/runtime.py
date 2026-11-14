@@ -132,18 +132,17 @@ def _interrupt_payload(interrupts) -> dict | None:
     return None
 
 
-def _interrupt_orders(state: dict):
-    payload = _interrupt_payload(state.get("__interrupt__"))
-    return payload.get("orders") if payload else None
-
-
 def _pending_payload(snapshot) -> dict | None:
     return _interrupt_payload(getattr(snapshot, "interrupts", ())) if snapshot else None
 
 
 def _interrupt_event(cid: int, payload: dict) -> dict:
-    return {"type": "interrupt", "conversation_id": cid,
-            "kind": payload.get("type", ""), "orders": payload.get("orders", [])}
+    ev = {"type": "interrupt", "conversation_id": cid,
+          "kind": payload.get("type", "")}
+    for k in ("orders", "preview"):                 # 按中断类型透传负载
+        if payload.get(k) is not None:
+            ev[k] = payload[k]
+    return ev
 
 
 def _merge_actions(actions: list, seen: set, incoming: list) -> None:
@@ -159,7 +158,7 @@ def _turn_result(cid: int, final: dict, prev_messages: list) -> dict:
     turn = final.get("messages", [])[len(prev_messages):]
     return {"conversation_id": cid,
             "state": {**final, "turn_messages": turn},
-            "interrupt": _interrupt_orders(final)}
+            "interrupt": _interrupt_payload(final)}
 
 
 async def run_turn(user_id, message, conversation_id) -> dict:
@@ -177,7 +176,7 @@ async def run_turn(user_id, message, conversation_id) -> dict:
     if pending:
         return {"conversation_id": cid,
                 "state": {**(prev.values or {}), "answer": "", "turn_messages": []},
-                "interrupt": pending.get("orders")}
+                "interrupt": pending}
     prev_messages = (prev.values or {}).get("messages", []) if prev else []
     ctx = await _load_context(cid)
     final = await graph.ainvoke(

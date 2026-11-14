@@ -67,7 +67,7 @@ async def _run_rounds(user: str, questions: list[str], rounds: int) -> int:
         out = await runtime.run_turn(user, questions[i % len(questions)], cid)
         cid = out["conversation_id"]
         if out.get("interrupt"):
-            orders = out["interrupt"] or []
+            orders = (out["interrupt"] or {}).get("orders") or []
             if orders:
                 await runtime.resume_turn(cid, orders[0]["order_id"])
         if (i + 1) % 5 == 0:

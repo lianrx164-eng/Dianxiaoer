@@ -47,11 +47,15 @@ async def create_refund_action(req: CreateRefundRequest) -> CreateRefundResponse
 
 @router.post("/api/actions/resume")
 async def resume_action(req: ResumeRequest):
-    """订单选择器点选后续跑暂停的退款子流程(SSE,事件与 /api/chat 同构)。"""
+    """订单选择器点选 / 工单预览确认后,续跑暂停的流程(SSE,事件与 /api/chat 同构)。"""
+    if req.order_id is None and req.confirmed is None:
+        raise HTTPException(status_code=400, detail="order_id 与 confirmed 至少传一个")
+    resume_value = req.order_id if req.order_id is not None else {"confirmed": bool(req.confirmed)}
+
     async def event_stream() -> AsyncIterator[str]:
         try:
             async for frame in event_frames(
-                    runtime.stream_resume(req.conversation_id, req.order_id)):
+                    runtime.stream_resume(req.conversation_id, resume_value)):
                 yield frame
         except Exception as exc:  # noqa: BLE001 - 流已发 200,错误只能走帧
             kind = errors.classify(exc)

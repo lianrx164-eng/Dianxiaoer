@@ -25,7 +25,6 @@ async def event_frames(events: AsyncIterator[dict]) -> AsyncIterator[str]:
             yield sse({"event": "actions", "items": ev["items"]})
         elif kind == "interrupt":
             yield sse({"event": "interrupt",
-                       "conversation_id": ev["conversation_id"],
-                       "kind": ev["kind"], "orders": ev["orders"]})
+                       **{k: v for k, v in ev.items() if k != "type"}})
         elif kind == "done":
             yield sse({"event": "done", "conversation_id": ev["conversation_id"]})

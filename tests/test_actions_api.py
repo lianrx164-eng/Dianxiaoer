@@ -37,3 +37,38 @@ def test_create_ticket_db_error_returns_503(monkeypatch):
     r = TestClient(app).post("/api/actions/create-ticket", json={
         "conversation_id": 5, "description": "x", "ticket_type": "咨询"})
     assert r.status_code == 503
+
+
+def test_resume_requires_order_id_or_confirmed():
+    r = TestClient(app).post("/api/actions/resume", json={"conversation_id": 5})
+    assert r.status_code == 400
+
+
+def test_resume_confirmed_builds_confirmation_payload(monkeypatch):
+    seen = {}
+
+    async def fake_stream(cid, value):
+        seen["cid"] = cid
+        seen["value"] = value
+        if False:
+            yield {}
+
+    monkeypatch.setattr(actions.runtime, "stream_resume", fake_stream)
+    r = TestClient(app).post("/api/actions/resume", json={
+        "conversation_id": 5, "confirmed": True})
+    assert r.status_code == 200
+    assert seen == {"cid": 5, "value": {"confirmed": True}}
+
+
+def test_resume_order_id_stays_string(monkeypatch):
+    seen = {}
+
+    async def fake_stream(cid, value):
+        seen["value"] = value
+        if False:
+            yield {}
+
+    monkeypatch.setattr(actions.runtime, "stream_resume", fake_stream)
+    r = TestClient(app).post("/api/actions/resume", json={
+        "conversation_id": 5, "order_id": "1001"})
+    assert r.status_code == 200 and seen["value"] == "1001"

@@ -27,14 +27,14 @@ def test_budget_with_demo_config():
         max_user_input_tokens=2000, max_agent_steps=3,
         tool_result_max_tokens=1200, rerank_top_k=5))
     assert (b.window, b.fixed, b.react_peak, b.history, b.layer1, b.layer2) == (
-        18000, 9037, 3600, 5363, 3753, 1609)
+        18000, 9063, 3600, 5337, 3734, 1602)
 
 
 def test_only_window_set_yields_small_history_and_self_check_warns(caplog):
     s = _settings(model_context_window=18000)      # 步数/rerank 保持默认 6/10
     b = cb.compute_budget(s)
     assert (b.fixed, b.react_peak, b.history, b.layer1, b.layer2) == (
-        11037, 7200, 0, 0, 0)
+        11063, 7200, 0, 0, 0)
     with caplog.at_level(logging.ERROR, logger="app.core.context_budget"):
         cb.self_check(s)
     assert "上下文预算不足" in caplog.text
@@ -43,7 +43,7 @@ def test_only_window_set_yields_small_history_and_self_check_warns(caplog):
 def test_default_budget():
     b = cb.compute_budget(_settings())
     assert (b.window, b.fixed, b.react_peak, b.history, b.layer1, b.layer2) == (
-        64000, 11037, 7200, 30000, 20999, 9000)
+        64000, 11063, 7200, 30000, 20999, 9000)
 
 
 def test_budget_constants_match_prompt_and_tools():

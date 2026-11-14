@@ -6,6 +6,7 @@ from runtime_fakes import patch_runtime_repo
 
 from app.graph import nodes, runtime
 from app.graph.build import build_graph
+from app.tools import engine, registry
 
 
 def _aval(value):
@@ -44,7 +45,7 @@ async def test_stream_chitchat_emits_fixed_reply(monkeypatch):
     assert events[-1]["type"] == "done" and events[-1]["conversation_id"] == 7
 
 
-async def test_stream_agent_create_ticket_becomes_action_not_write(monkeypatch):
+async def test_stream_agent_create_ticket_interrupts_for_confirmation(monkeypatch):
     monkeypatch.setattr(nodes, "classify_intent", _aval(
         {"intent": "订单", "route": "business", "trace": {"route": "business"}}))
     calls = {"n": 0}
@@ -56,23 +57,25 @@ async def test_stream_agent_create_ticket_becomes_action_not_write(monkeypatch):
                 {"name": "create_ticket",
                  "args": {"description": "屏幕碎了", "ticket_type": "售后"}, "id": "t1"}])],
                 "steps": 1, "tokens_used": 5}
-        return {"messages": [AIMessage("已为您准备好工单选项,可点击下方按钮提交")],
-                "steps": 2, "tokens_used": 10}
+        return {"messages": [AIMessage("请确认工单信息")], "steps": 2, "tokens_used": 10}
 
-    async def fail_write(*a, **k):
-        raise AssertionError("拦截为提议时不应写 tickets")
+    async def only_builtin():
+        return registry.builtin_specs()
+
+    async def fake_audit(**kw):
+        return None
 
     monkeypatch.setattr(nodes, "agent_llm", fake_agent)
-    monkeypatch.setattr(nodes.repository, "create_ticket", fail_write)
+    monkeypatch.setattr(nodes.registry, "get_all_specs", only_builtin)
+    monkeypatch.setattr(engine.repository, "insert_tool_audit", fake_audit)
     monkeypatch.setattr(runtime, "get_graph",
                         lambda: build_graph(checkpointer=InMemorySaver()))
 
     events = await _collect(runtime.stream_turn("u1", "屏幕碎了要售后", None))
-    actions = [e for e in events if e["type"] == "actions"]
-    assert actions and actions[0]["items"][0]["type"] == "create_ticket"
-    assert actions[0]["items"][0]["draft"]["description"] == "屏幕碎了"
-    assert not [e for e in events if e["type"] == "tool"]   # create_ticket 不出工具徽章
-    assert any(e["type"] == "delta" and "工单选项" in e["text"] for e in events)
+    intr = [e for e in events if e["type"] == "interrupt"]
+    assert intr and intr[0]["kind"] == "confirm_ticket"
+    assert intr[0]["preview"] == {"ticket_type": "售后", "description": "屏幕碎了"}
+    assert not [e for e in events if e["type"] in ("actions", "tool")]
 
 
 async def test_stream_unknown_conversation_raises(monkeypatch):

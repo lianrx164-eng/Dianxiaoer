@@ -91,7 +91,7 @@ async def main():
         # 验收4 非流式:缺单 → interrupt
         b = await agent(c, "我要退款")
         cid4 = b["conversation_id"]
-        orders = b.get("interrupt") or []
+        orders = (b.get("interrupt") or {}).get("orders") or []
         results.append(("验收4a 缺单弹订单选择器(interrupt)", bool(orders), orders))
 
         # 验收4 流式续跑:点第一单 → resume SSE
