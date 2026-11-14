@@ -18,6 +18,7 @@ from app.core.prompts import (
     COMPLAINT_REPLY_TEXT,
     FALLBACK_REPLY_TEXT,
     REFUND_JUDGE_HINT,
+    SCRIPT_REPLY_OTHER,
 )
 from app.db import repository
 from app.graph.routing import INTENT_TO_ROUTE
@@ -58,6 +59,13 @@ async def chitchat_reply(state) -> dict:
     """闲聊:固定话术,零模型调用。"""
     return {"answer": CHITCHAT_REPLY,
             "trace": trace_of(state, route="chitchat")}
+
+
+async def script_reply(state) -> dict:
+    """闲聊/其他 兜底话术(零模型):按 intent 分文案——闲聊把话题引回产品,其他请用户说具体些。
+    分流后立即命中、不进 Agent。(与知识路证据弱的 fallback_reply 是两码事,勿混。)"""
+    text = SCRIPT_REPLY_OTHER if state.get("intent") == "其他" else CHITCHAT_REPLY_TEXT
+    return {"answer": text, "trace": trace_of(state, route="fallback_script")}
 
 
 async def complaint_reply(state) -> dict:
