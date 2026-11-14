@@ -28,8 +28,14 @@ JOBS: dict[str, JobSpec] = {
         JobSpec("kb-mine", "kb-mine", heavy=True),
         JobSpec("seed-conv", "seed-conv"),
         JobSpec("eval-rag", "eval-rag", heavy=True),
+        JobSpec("cost-report", "cost-report"),
+        JobSpec("eval-flywheel", "eval-flywheel", heavy=True),
+        JobSpec("calibrate-confidence", "calibrate-confidence", heavy=True),
     ]
 }
+
+# 子进程要打开 Milvus Lite 文件,起之前必须让出进程内单例锁
+_MILVUS_JOBS = {"eval-rag", "eval-flywheel", "calibrate-confidence"}
 
 
 class JobAlreadyRunning(Exception):
@@ -83,8 +89,8 @@ def start(name: str) -> dict:
         if old is not None:
             old.close()
 
-        if name == "eval-rag":
-            # 离线评估子进程要打开 Lite 数据目录,先让出进程内单例锁
+        if name in _MILVUS_JOBS:
+            # 离线评估/校准子进程要打开 Lite 数据目录,先让出进程内单例锁
             from app.kb import milvus_client
             milvus_client.release()
 

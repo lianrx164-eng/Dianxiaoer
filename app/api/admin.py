@@ -91,6 +91,31 @@ async def _rageval_card() -> dict:
     )
 
 
+async def _observability_card() -> dict:
+    from app.api import observability as obs
+    try:
+        d = await obs.overview()
+    except Exception:
+        return _card("observability", "观测与成本", "/observability", "读数失败", "读不到", {})
+    cost, ev, cal = d["cost"], d["eval"], d["calibration"]
+    latest = ev["runs"][0]["metrics"] if ev.get("runs") else {}
+    if ev["status"] == "error":
+        return _card("observability", "观测与成本", "/observability", "读数失败",
+                     "评估趋势读不到(MySQL)", {})
+    if cal.get("present") and not cal.get("in_sync"):
+        status, conclusion = "要干活", cal.get("hint", "校准阈值未回填")
+    elif cost["present"] and ev["present"] and cal["present"]:
+        status, conclusion = "正常", "成本账、趋势、校准三块都有数"
+    else:
+        status, conclusion = "没跑过", "有报表还没跑,进页面按一次"
+    return _card("observability", "观测与成本", "/observability", status, conclusion, {
+        "top_intent": cost.get("top_intent"),
+        "eval_runs": len(ev.get("runs", [])),
+        "faithfulness": latest.get("faithfulness"),
+        "threshold": cal.get("current_threshold"),
+    })
+
+
 @router.get("/api/admin/overview")
 async def overview() -> dict:
     return {"cards": [
@@ -98,5 +123,6 @@ async def overview() -> dict:
         await _dualwrite_card(),
         await _staging_card(),
         await _jobs_card(),
+        await _observability_card(),
         await _rageval_card(),
     ]}

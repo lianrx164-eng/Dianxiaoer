@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>观测与成本 | 喵喵优选</title>
+<link rel="stylesheet" href="/static/acceptance.css">
+<script src="/static/admin.js"></script>
+<script src="/static/acceptance.js"></script>
+<style>
+  .panel { margin-bottom: 18px; }
+  .panel h2 { margin: 0 0 6px; font-size: 15px; }
+  .panel h2 .pill { margin-left: 8px; }
+  .bar { height: 8px; background: #f3ead9; border: 1px solid #d8c9ae; min-width: 80px; }
+  .bar > i { display: block; height: 100%; background: #f7941d; }
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  th, td { border-bottom: 1px solid #e7dcc8; padding: 6px 8px; text-align: left; }
+  th { color: #6b5b45; font-weight: 600; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .drop { color: #b91c1c; font-weight: 700; }
+  .up { color: #166534; }
+  .flat { color: #8a7760; }
+  .missing { border: 2px dashed #c9a36a; background: #fff8ec; padding: 12px 14px; font-size: 12.5px; }
+  .joblog { margin-top: 8px; background: #1c1c1c; color: #e8e0cf; font-size: 11.5px;
+    padding: 8px 10px; max-height: 180px; overflow: auto; white-space: pre-wrap; display: none; }
+  .joblog.show { display: block; }
+  .kpis { display: flex; flex-wrap: wrap; gap: 18px; font-size: 12.5px; margin: 4px 0 10px; }
+  .kpis b { font-size: 16px; }
+</style>
+</head>
+<body class="admin-page">
+<div id="admin-nav"></div>
+<main class="admin-shell">
+  <h1 class="admin-title">观测与成本</h1>
+  <p class="admin-sub">三张报表各自独立:某块依赖没起只让它自己显示原因,不连坐整页。数字与终端脚本同一份。</p>
+  <div id="panels"><span class="muted">读取中…</span></div>
+</main>
+<script>
+  mountAdminNav('observability');
+  const { el, getJSON, pill } = AC;
+  const panels = document.getElementById('panels');
+  const NAMES = { 'recall_at_10': 'Recall@10', 'mrr': 'MRR', 'faithfulness': 'Faithfulness', 'refusal_rate': '拒答率' };
+
+  function pct(x) { return (Number(x || 0) * 100).toFixed(0) + '%'; }
+  function fmt3(x) { return Number(x).toFixed(3); }
+
+  function panel(title, status, body, job, hint) {
+    const head = el('h2', {}, [document.createTextNode(title), pill(status, status === '正常' ? 'ok' : status === '读数失败' ? 'bad' : 'warn')]);
+    const btn = el('button', { class: 'btn' + (job.heavy ? ' heavy' : ''), text: '重跑' });
+    const log = el('pre', { class: 'joblog' });
+    btn.onclick = () => runJob(job, log, btn);
+    const kids = [head];
+    if (hint) kids.push(el('p', { class: 'missing', text: hint }));
+    kids.push(body);
+    kids.push(el('div', { class: 'btnrow', style: 'margin-top:10px' }, [btn]));
+    kids.push(log);
+    return el('section', { class: 'card panel' }, kids);
+  }
+
+  async function runJob(job, log, btn) {
+    if (job.heavy && !confirm('「' + job.name + '」是分钟级重活,确认现在跑?')) return;
+    btn.disabled = true;
+    log.classList.add('show');
+    log.textContent = '启动中…';
+    try {
+      await getJSON('/api/jobs/' + encodeURIComponent(job.name), { method: 'POST' });
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 1200));
+        const st = await getJSON('/api/jobs/' + encodeURIComponent(job.name));
+        log.textContent = st.log_tail || '(暂无输出)';
+        if (!st.running) break;
+      }
+      log.textContent += '\n—— 跑完,刷新报表 ——';
+      await load();
+    } catch (e) {
+      log.textContent += '\n启动失败:' + e.message;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  function costBody(b) {
+    if (!b.present) return el('span', { class: 'muted', text: '—' });
+    const rows = b.rows.map((r) => el('tr', {}, [
+      el('td', { text: r.intent }),
+      el('td', { class: 'num', text: String(r.count) }),
+      el('td', { class: 'num', text: Number(r.tokens).toLocaleString() }),
+      el('td', { class: 'num', text: Number(r.avg_tokens).toLocaleString() }),
+      el('td', { class: 'num', text: pct(r.share) }),
+      el('td', {}, [el('div', { class: 'bar' }, [el('i', { style: 'width:' + pct(r.share) })])]),
+    ]));
+    return el('div', {}, [
+      el('div', { class: 'kpis' }, [
+        el('span', {}, [document.createTextNode('窗口 '), el('b', { text: b.days + ' 天' })]),
+        el('span', {}, [document.createTextNode('最烧钱 '), el('b', { text: b.top_intent || '—' })]),
+        el('span', {}, [document.createTextNode('总 tokens '), el('b', { text: Number(b.total_tokens || 0).toLocaleString() })]),
+      ]),
+      el('div', { class: 'tablerow' }, [el('table', {}, [
+        el('tr', {}, ['意图', '请求数', '总 tokens', '平均 tokens', '占比', ''].map((h) => el('th', { text: h }))),
+        ...rows,
+      ])]),
+    ]);
+  }
+
+  function evalBody(b) {
+    if (!b.present) return el('span', { class: 'muted', text: '—' });
+    const names = Object.keys(NAMES);
+    const header = el('tr', {}, ['轮次', '时间', '触发', ...names.map((n) => NAMES[n])].map((h) => el('th', { text: h })));
+    const rows = b.runs.map((r, i) => {
+      const prev = b.runs[i + 1];
+      const cells = names.map((n) => {
+        const v = r.metrics ? r.metrics[n] : null;
+        if (v === null || v === undefined) return el('td', { class: 'num', text: '—' });
+        let mark = '', cls = 'num';
+        if (prev && prev.metrics && prev.metrics[n] !== null && prev.metrics[n] !== undefined) {
+          const d = v - prev.metrics[n];
+          if (d > 0.005) { mark = ' ↑'; cls = 'num up'; }
+          else if (d < -0.005) { mark = ' ⚠↓'; cls = 'num drop'; }
+          else { mark = ' →'; cls = 'num flat'; }
+        }
+        return el('td', { class: cls, text: fmt3(v) + mark });
+      });
+      return el('tr', {}, [
+        el('td', { text: '#' + r.id }),
+        el('td', { text: r.created_at ? r.created_at.replace('T', ' ').slice(0, 16) : '—' }),
+        el('td', { text: r.triggered_by }),
+        ...cells,
+      ]);
+    });
+    return el('div', { class: 'tablerow' }, [el('table', {}, [header, ...rows])]);
+  }
+
+  function curveSvg(curve, rec, cur) {
+    if (!curve || !curve.length) return el('span', { class: 'muted', text: '无扫描曲线' });
+    const W = 560, H = 190, P = 26;
+    const x = (t) => P + t * (W - 2 * P);
+    const y = (v) => H - P - v * (H - 2 * P);
+    const pts = (key) => curve.map((p) => x(p.t) + ',' + y(p[key])).join(' ');
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    svg.setAttribute('width', '100%');
+    svg.innerHTML =
+      '<rect x="' + P + '" y="' + P + '" width="' + (W - 2 * P) + '" height="' + (H - 2 * P) + '" fill="#fff8ec" stroke="#d8c9ae"/>' +
+      '<polyline points="' + pts('tpr') + '" fill="none" stroke="#166534" stroke-width="2"/>' +
+      '<polyline points="' + pts('fpr') + '" fill="none" stroke="#b91c1c" stroke-width="2"/>' +
+      '<line x1="' + x(rec) + '" y1="' + P + '" x2="' + x(rec) + '" y2="' + (H - P) + '" stroke="#f7941d" stroke-dasharray="4 3"/>' +
+      '<line x1="' + x(cur) + '" y1="' + P + '" x2="' + x(cur) + '" y2="' + (H - P) + '" stroke="#1c1c1c" stroke-dasharray="2 3"/>' +
+      '<text x="' + (x(rec) + 4) + '" y="' + (P + 14) + '" font-size="11" fill="#b45309">推荐 ' + rec.toFixed(2) + '</text>' +
+      '<text x="' + (x(cur) + 4) + '" y="' + (H - P - 6) + '" font-size="11" fill="#1c1c1c">在用 ' + cur.toFixed(2) + '</text>';
+    return el('div', {}, [
+      svg,
+      el('div', { class: 'muted', text: '绿=可答通过率,红=应拒放行率;橙虚线=推荐阈值,黑点线=在用阈值。' }),
+    ]);
+  }
+
+  function calibBody(b) {
+    if (!b.present) return el('span', { class: 'muted', text: '—' });
+    const a = b.answerable || {}, d = b.absent || {};
+    return el('div', {}, [
+      el('div', { class: 'kpis' }, [
+        el('span', {}, [document.createTextNode('推荐阈值 '), el('b', { text: fmt3(b.recommended_threshold) })]),
+        el('span', {}, [document.createTextNode('在用阈值 '), el('b', { text: fmt3(b.current_threshold) })]),
+        el('span', {}, [document.createTextNode('Youden J '), el('b', { text: fmt3(b.youden_j || 0) })]),
+      ]),
+      el('table', {}, [
+        el('tr', {}, ['桶', 'n', 'p25', 'p50', 'p75'].map((h) => el('th', { text: h }))),
+        el('tr', {}, ['可答', a.n ?? '—', a.p25 ?? '—', a.p50 ?? '—', a.p75 ?? '—'].map((v) => el('td', { text: String(v) }))),
+        el('tr', {}, ['应拒', d.n ?? '—', d.p25 ?? '—', d.p50 ?? '—', d.p75 ?? '—'].map((v) => el('td', { text: String(v) }))),
+      ]),
+      curveSvg(b.curve, b.recommended_threshold, b.current_threshold),
+    ]);
+  }
+
+  async function load() {
+    try {
+      const d = await getJSON('/api/observability/overview');
+      panels.innerHTML = '';
+      panels.appendChild(panel('意图成本账', d.cost.present ? '正常' : (d.cost.status === 'error' ? '读数失败' : '没跑过'),
+        costBody(d.cost), { name: 'cost-report', heavy: false }, d.cost.present ? '' : d.cost.hint));
+      panels.appendChild(panel('评估趋势', d.eval.present ? '正常' : (d.eval.status === 'error' ? '读数失败' : '没跑过'),
+        evalBody(d.eval), { name: 'eval-flywheel', heavy: true }, d.eval.present ? '' : d.eval.hint));
+      panels.appendChild(panel('置信度阈值校准', d.calibration.present ? (d.calibration.in_sync ? '正常' : '要干活') : '没跑过',
+        calibBody(d.calibration), { name: 'calibrate-confidence', heavy: true },
+        d.calibration.present ? d.calibration.hint : d.calibration.hint));
+    } catch (e) {
+      panels.innerHTML = '';
+      panels.appendChild(el('span', { class: 'muted', text: '读取失败:' + e.message }));
+    }
+  }
+
+  load();
+</script>
+</body>
+</html>
