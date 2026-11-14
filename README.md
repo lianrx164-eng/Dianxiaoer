@@ -207,7 +207,7 @@ checkpointer 的 sqlite 文件由 `AsyncSqliteSaver.setup()` 自建,已在 `.git
 2. **物流自调工具**:`/api/agent` 问「订单1001的物流到哪了」,`tool_calls` 为 `query_order → query_logistics`。
 3. **投诉两按钮**:聊天页说「我要投诉」→ 两按钮;点转人工显示「已转接人工客服」+「您好,我是客服小猫…」;点建工单填表后写库并显示单号;都不点继续对话正常。
 4. **闲聊固定话术**:「你好呀」→ `chitchat_reply`,不调工具。
-5. **ReAct 多步**:「我手机尾号1001那个订单发货没?到哪了?」→ `query_order` 取 `tracking_no` 再 `query_logistics`,`steps > 1`。
+5. **ReAct 多步**:「订单1001买的是什么?顺便看看物流到哪了」→ `query_order` 取 `tracking_no` 再 `query_logistics`,`steps > 1`。
 
 ### 测试
 

@@ -28,3 +28,8 @@ def test_agent_system_covers_tool_principles():
 def test_agent_prompt_has_history_placeholder():
     assert any(getattr(m, "variable_name", None) == "history"
                for m in AGENT_PROMPT.messages)
+
+
+def test_agent_system_treats_create_ticket_as_option_only():
+    assert "不会真的建单" in AGENT_SYSTEM
+    assert "可点击下方" in AGENT_SYSTEM

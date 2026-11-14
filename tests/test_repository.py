@@ -27,7 +27,7 @@ async def test_search_faq_like_hit_and_miss(db_session_factory, db_clean):
     assert await repo.search_faq("鞋子") == []              # 漏召回(字面不含)
 
 
-async def test_create_ticket_writes_and_flips_conversation_status(db_session_factory, db_clean):
+async def test_create_ticket_writes_without_flipping_conversation_status(db_session_factory, db_clean):
     cid = await repo.create_conversation("u1")
     no = await repo.create_ticket(cid, "要退货", "售后")
     assert no.startswith("T")
@@ -35,4 +35,4 @@ async def test_create_ticket_writes_and_flips_conversation_status(db_session_fac
         t = await s.get(Ticket, no)
         assert t.ticket_type == "售后" and t.status == "待处理"
         conv = await s.get(Conversation, cid)
-        assert conv.status == "已转人工"          # 会话状态流转
+        assert conv.status == "进行中"            # 建工单 ≠ 转人工

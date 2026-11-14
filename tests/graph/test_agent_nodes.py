@@ -21,6 +21,18 @@ def test_agent_messages_no_evidence_on_business():
     assert "已检索到的知识证据" not in msgs[0].content
 
 
+def test_agent_messages_trims_long_history(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "token_budget", 50)
+    old = [HumanMessage("旧问题"), AIMessage("长回答" * 5000)]
+    msgs = nodes._agent_messages(
+        {"route": "business", "messages": [*old, HumanMessage("新问题")]})
+    assert msgs[0].type == "system"
+    assert msgs[-1].content == "新问题"
+    assert all("旧问题" != m.content for m in msgs[1:])
+
+
 @pytest.mark.asyncio
 async def test_agent_llm_accumulates_steps_and_tokens(monkeypatch):
     ai = AIMessage("好的", usage_metadata={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15})
@@ -68,3 +80,6 @@ async def test_agent_tools_intercepts_create_ticket(monkeypatch):
     assert act["type"] == "create_ticket"
     assert act["draft"]["description"] == "屏幕碎了"
     assert out["messages"][0].tool_call_id == "t9"
+    # 拦截只产生选项,必须让模型明确「尚未创建」,不能声称已提交
+    assert "尚未创建" in out["messages"][0].content
+    assert "不要声称" in out["messages"][0].content

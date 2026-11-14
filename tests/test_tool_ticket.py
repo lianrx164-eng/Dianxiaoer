@@ -25,3 +25,19 @@ async def test_create_ticket_injects_conversation_id_and_writes(db_session_facto
     async with db_session_factory() as s:
         t = await s.get(Ticket, r["ticket_no"])
         assert t is not None and t.conversation_id == cid
+
+
+async def test_create_ticket_does_not_mark_conversation_transferred(db_session_factory, db_clean):
+    from app.db.models import Conversation
+
+    async with db_session_factory() as s:
+        conv = Conversation(user_id="u1")
+        s.add(conv)
+        await s.commit()
+        cid = conv.id
+    await create_ticket.ainvoke(
+        {"description": "东西坏了", "ticket_type": "售后", "conversation_id": cid}
+    )
+    async with db_session_factory() as s:
+        conv = await s.get(Conversation, cid)
+        assert conv.status == "进行中"     # 建工单 ≠ 转人工

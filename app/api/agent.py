@@ -13,9 +13,11 @@ router = APIRouter()
 
 
 def _views_from_state(state):
-    """从终态 messages 重建工具调用/结果轨迹(供评估/单测看模型选了什么工具)。"""
+    """从终态重建本轮工具调用/结果轨迹(供评估/单测看模型选了什么工具)。
+    runtime 有 turn_messages 时只看本轮,避免续接会话把历史轮轨迹重复返回。"""
     calls, results = [], []
-    for m in state.get("messages", []):
+    messages = state.get("turn_messages") or state.get("messages", [])
+    for m in messages:
         if isinstance(m, AIMessage) and m.tool_calls:
             for tc in m.tool_calls:
                 calls.append(ToolCallView(id=tc["id"], name=tc["name"], args=tc["args"]))

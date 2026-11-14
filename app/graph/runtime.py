@@ -1,4 +1,5 @@
 import logging
+import uuid
 from collections.abc import AsyncIterator
 
 from langchain_core.messages import HumanMessage
@@ -57,9 +58,18 @@ async def _ensure_conversation(user_id: str, conversation_id: int | None) -> int
     return conversation_id
 
 
-def _graph_input(user_id: str, message: str, cid: int) -> dict:
+def _human_id(message: str, prev_messages: list) -> str:
+    """失败轮的人类消息已写进 checkpoint;同样的内容重试时复用 id,
+    add_messages 会替换而不是再追加一条,避免历史里叠出两条相同提问。"""
+    if (prev_messages and isinstance(prev_messages[-1], HumanMessage)
+            and prev_messages[-1].content == message):
+        return prev_messages[-1].id or str(uuid.uuid4())
+    return str(uuid.uuid4())
+
+
+def _graph_input(user_id: str, message: str, cid: int, prev_messages: list | None = None) -> dict:
     return {
-        "messages": [HumanMessage(message)],
+        "messages": [HumanMessage(message, id=_human_id(message, prev_messages or []))],
         "user_id": user_id, "conversation_id": cid,
         # 每轮显式重置:这些是普通字段,不重置会残留上一轮的键/答案/按钮
         "intent": "", "route": "", "evidence": "", "citations": [],
@@ -69,23 +79,32 @@ def _graph_input(user_id: str, message: str, cid: int) -> dict:
 
 
 async def run_turn(user_id, message, conversation_id) -> dict:
-    """非流式:落 user 消息 → ainvoke → 返回终态(供 /api/agent、eval)。"""
+    """非流式:ainvoke → 返回终态(供 /api/agent、eval)。
+
+    用户/助手消息由 log 节点统一落 MySQL,失败轮不留半条记录;
+    重试同文时复用 message id 去重,turn_messages 只含本轮新增消息。"""
     cid = await _ensure_conversation(user_id, conversation_id)
-    await repository.append_message(cid, "user", content=message)
     config = {"configurable": {"thread_id": str(cid)}}
-    final = await get_graph().ainvoke(_graph_input(user_id, message, cid), config)
-    return {"conversation_id": cid, "state": final}
+    graph = get_graph()
+    prev = await graph.aget_state(config)
+    prev_messages = (prev.values or {}).get("messages", []) if prev else []
+    final = await graph.ainvoke(
+        _graph_input(user_id, message, cid, prev_messages), config)
+    turn = final.get("messages", [])[len(prev_messages):]
+    return {"conversation_id": cid, "state": {**final, "turn_messages": turn}}
 
 
 async def stream_turn(user_id, message, conversation_id) -> AsyncIterator[dict]:
-    """流式:落 user 消息 → astream 多模式 → 映射成事件 dict(供 /api/chat 转 SSE)。"""
+    """流式:astream 多模式 → 映射成事件 dict(供 /api/chat 转 SSE)。"""
     cid = await _ensure_conversation(user_id, conversation_id)
-    await repository.append_message(cid, "user", content=message)
     config = {"configurable": {"thread_id": str(cid)}}
+    graph = get_graph()
+    prev = await graph.aget_state(config)
+    prev_messages = (prev.values or {}).get("messages", []) if prev else []
 
     actions: list = []
-    async for mode, chunk in get_graph().astream(
-        _graph_input(user_id, message, cid), config,
+    async for mode, chunk in graph.astream(
+        _graph_input(user_id, message, cid, prev_messages), config,
         stream_mode=["messages", "updates"],
     ):
         if mode == "messages":

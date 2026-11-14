@@ -85,9 +85,6 @@ async def create_ticket(conversation_id: int, description: str, ticket_type: str
                 ticket_type=ticket_type,
             )
         )
-        conv = await s.get(Conversation, conversation_id)
-        if conv is not None:
-            conv.status = "已转人工"
         await s.commit()
     return ticket_no
 

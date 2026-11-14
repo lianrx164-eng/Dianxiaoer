@@ -6,6 +6,7 @@ from app.config import settings
 from app.core import intent as intent_mod
 from app.core import query_understanding, retrieval, selfcheck
 from app.core.llm import get_chat_model
+from app.core.memory import trim_history
 from app.core.prompts import (
     AGENT_SYSTEM,
     CHITCHAT_REPLY_TEXT,
@@ -141,11 +142,12 @@ _KNOWLEDGE_EVIDENCE_HINT = (
 
 
 def _agent_messages(state) -> list:
-    """system(知识路拼证据) + 跨轮历史。"""
+    """system(知识路拼证据) + 按 token 预算裁剪过的跨轮历史。"""
     sys = AGENT_SYSTEM
     if state.get("route") == "knowledge" and state.get("evidence"):
         sys = AGENT_SYSTEM + _KNOWLEDGE_EVIDENCE_HINT + state["evidence"]
-    return [SystemMessage(sys), *state.get("messages", [])]
+    history = trim_history(state.get("messages", []), max_tokens=settings.token_budget)
+    return [SystemMessage(sys), *history]
 
 
 async def agent_llm(state, config=None) -> dict:
@@ -172,7 +174,9 @@ async def agent_tools(state) -> dict:
                 "ticket_type": args.get("ticket_type", "咨询"),
             }})
             tool_msgs.append(ToolMessage(
-                content="已把『建工单』选项交给用户自行确认。请用一句话简要说明并停止,不要再调用任何工具。",
+                content=("已把『建工单』选项交给用户自行确认,尚未创建工单。"
+                         "请用一句话请用户点击下方『建工单』按钮提交;"
+                         "不要声称已提交、已登记或已创建,也不要再调用任何工具。"),
                 tool_call_id=tc["id"], name="create_ticket"))
         else:
             run = await execute_tool_call(tc, state.get("conversation_id", 0))
@@ -206,6 +210,8 @@ async def log_node(state) -> dict:
     )
     answer = resolve_answer(state)
     if state.get("conversation_id"):
+        await repository.append_message(state["conversation_id"], "user",
+                                        content=_user_text(state))
         await repository.append_message(state["conversation_id"], "assistant",
                                         content=answer or None)
     if state.get("answer"):

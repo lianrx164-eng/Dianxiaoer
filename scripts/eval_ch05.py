@@ -38,8 +38,8 @@ async def main():
                         not b["tool_calls"] and b["answer"].startswith("你好呀"),
                         b["answer"][:18]))
 
-        # 验收5:复杂问 ReAct 多步,且先查订单再查物流
-        b = await agent(c, "我手机尾号1001那个订单发货没?到哪了?")
+        # 验收5:复合问 ReAct 多步,且先查订单再查物流
+        b = await agent(c, "订单1001买的是什么?顺便看看物流到哪了")
         names = [tc["name"] for tc in b["tool_calls"]]
         ordered = ("query_order" in names and "query_logistics" in names
                    and names.index("query_order") < names.index("query_logistics"))

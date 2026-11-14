@@ -13,7 +13,10 @@ async def test_run_turn_creates_conversation_when_none(monkeypatch):
         return 1
 
     class FakeGraph:
-        async def ainvoke(self, inp, config):
+        async def aget_state(self, config):
+            return type("S", (), {"values": {}})()
+
+        async def ainvoke(self, inp, config, durability=None):
             assert inp["trace"] == {}
             return {"answer": "hi", "messages": [], "conversation_id": inp["conversation_id"]}
 
@@ -47,7 +50,10 @@ async def test_stream_turn_maps_events(monkeypatch):
     monkeypatch.setattr(runtime.repository, "append_message", fake_append)
 
     class FakeGraph:
-        async def astream(self, inp, config, stream_mode=None):
+        async def aget_state(self, config):
+            return type("S", (), {"values": {}})()
+
+        async def astream(self, inp, config, stream_mode=None, durability=None):
             assert inp["trace"] == {} and inp["evidence"] == ""
             yield ("messages", (AIMessage("已"), {"langgraph_node": "agent_llm"}))
             yield ("messages", (AIMessage("发货"), {"langgraph_node": "agent_llm"}))
@@ -69,3 +75,60 @@ async def test_stream_turn_maps_events(monkeypatch):
     assert any(e["type"] == "citations" for e in events)
     assert any(e["type"] == "actions" for e in events)
     assert kinds[-1] == "done" and events[-1]["conversation_id"] == 7
+
+
+@pytest.mark.asyncio
+async def test_run_turn_returns_only_this_turns_messages(monkeypatch):
+    old = [AIMessage("old"), AIMessage("old2")]
+
+    async def fake_get(cid):
+        return object()
+
+    async def fake_append(*a, **k):
+        return 1
+
+    class FakeGraph:
+        async def aget_state(self, config):
+            return type("S", (), {"values": {"messages": old}})()
+
+        async def ainvoke(self, inp, config, durability=None):
+            return {"messages": [*old, inp["messages"][0], AIMessage("new")]}
+
+    monkeypatch.setattr(runtime.repository, "get_conversation", fake_get)
+    monkeypatch.setattr(runtime.repository, "append_message", fake_append)
+    monkeypatch.setattr(runtime, "get_graph", lambda: FakeGraph())
+    out = await runtime.run_turn("u1", "hi", 5)
+    assert [m.content for m in out["state"]["turn_messages"]] == ["hi", "new"]
+
+
+@pytest.mark.asyncio
+async def test_failed_turn_writes_no_mysql_and_retry_not_duplicated(monkeypatch):
+    from langgraph.checkpoint.memory import InMemorySaver
+
+    from app.graph import nodes
+    from app.graph.build import build_graph
+
+    async def boom(state):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(nodes, "coref", boom)
+    writes = []
+
+    async def fake_create(uid):
+        return 7
+
+    async def fake_append(cid, role, content=None, **k):
+        writes.append((role, content))
+        return 1
+
+    cp = InMemorySaver()
+    g = build_graph(checkpointer=cp)
+    monkeypatch.setattr(runtime, "get_graph", lambda: g)
+    monkeypatch.setattr(runtime.repository, "create_conversation", fake_create)
+    monkeypatch.setattr(runtime.repository, "append_message", fake_append)
+    for _ in range(2):
+        with pytest.raises(RuntimeError):
+            await runtime.run_turn("u1", "hi", None)
+    snap = await g.aget_state({"configurable": {"thread_id": "7"}})
+    assert len(snap.values.get("messages", [])) == 1   # 重试复用 message id,不叠重复
+    assert writes == []                                # 失败轮不落 MySQL 半条记录

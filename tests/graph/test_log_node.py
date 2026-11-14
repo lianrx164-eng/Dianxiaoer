@@ -15,17 +15,17 @@ def test_resolve_answer_falls_back_to_last_ai():
 
 @pytest.mark.asyncio
 async def test_log_node_persists_and_backfills_deterministic_answer(monkeypatch):
-    saved = {}
+    calls = []
 
     async def fake_append(cid, role, content=None, **k):
-        saved.update(cid=cid, role=role, content=content)
+        calls.append((role, content))
         return 1
 
     monkeypatch.setattr(nodes.repository, "append_message", fake_append)
     out = await nodes.log_node({
         "conversation_id": 8, "intent": "闲聊", "route": "chitchat",
         "answer": "你好呀", "messages": [HumanMessage("你好")], "trace": {"forced_rag": False}})
-    assert saved["cid"] == 8 and saved["role"] == "assistant" and saved["content"] == "你好呀"
+    assert calls == [("user", "你好"), ("assistant", "你好呀")]
     assert out["messages"][0].content == "你好呀"
 
 
