@@ -25,8 +25,8 @@ async def main():
         b = await agent(c, "退货政策是什么")
         tr = b.get("trace", {})
         results.append(("验收1 强制检索(trace)",
-                        b.get("route") == "knowledge" and tr.get("forced_rag") is True,
-                        {"route": b.get("route"), "forced_rag": tr.get("forced_rag")}))
+                        tr.get("route") == "knowledge" and tr.get("forced_rag") is True,
+                        {"route": tr.get("route"), "forced_rag": tr.get("forced_rag")}))
 
         # 验收2:业务数据类,Agent 自调 query_logistics
         b = await agent(c, "订单1001的物流到哪了")
