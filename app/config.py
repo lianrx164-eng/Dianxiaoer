@@ -31,5 +31,9 @@ class Settings(BaseSettings):
     rerank_top_k: int = 10
     rerank_min_score: float = 0.3
 
+    # ch05 图编排
+    max_agent_steps: int = 6              # ReAct 环最大步数(封顶,超则兜底)
+    checkpointer_db_path: str = "data/ch05_checkpoints.sqlite"
+
 
 settings = Settings()

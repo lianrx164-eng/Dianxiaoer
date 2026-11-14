@@ -3,8 +3,9 @@ __pycache__/
 *.pyc
 .env
 .pytest_cache/
-# Milvus Lite 本地库文件
+# Milvus Lite 本地库文件 / LangGraph checkpointer
 data/*.db*
+data/*.sqlite*
 # 临时探测脚本
 .scratch/
 # 页面作业日志
