@@ -48,6 +48,11 @@ async def process_pending(limit: int = 50) -> dict:
             stats["skipped"] += 1
             continue
         mid = r.matched_question_id
+        normalized = (r.normalized_question or "").strip()[:500]   # 列宽 512,防模型超长输出炸库
+        if mid is None and not normalized:
+            logger.warning("flywheel 标准化结果为空 lcq=%s(跳过,下轮重试)", row.id)
+            stats["skipped"] += 1
+            continue
         if mid is not None:
             if not any(c["id"] == mid for c in candidates):
                 logger.warning("flywheel 幻觉 id=%s lcq=%s(候选里不存在,跳过下轮重试)",
@@ -59,7 +64,7 @@ async def process_pending(limit: int = 50) -> dict:
             stats["merged"] += 1
         else:
             review_id = await repository.insert_review_item(
-                r.normalized_question, r.ai_suggested_answer or None)
+                normalized, (r.ai_suggested_answer or None))
             stats["created"] += 1
         await repository.set_matched_review(row.id, review_id)
         stats["processed"] += 1

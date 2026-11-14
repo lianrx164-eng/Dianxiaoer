@@ -71,7 +71,7 @@ async def _refused(sample: dict) -> bool | None:
     return None if chk is None else not chk["useful"]
 
 
-async def _one(kind: str, sample: dict):
+async def _refusal_guarded(sample: dict):
     async with _SEM:
         try:
             return await _refused(sample)
@@ -90,7 +90,7 @@ async def run_once() -> dict:
     faiths = [r[2] for r in results if r[2] is not None]
     faithfulness = _mean([1.0 if f else 0.0 for f in faiths]) or 0.0
 
-    refusals = [r for r in await asyncio.gather(*(_one("refusal", s) for s in absent))
+    refusals = [r for r in await asyncio.gather(*(_refusal_guarded(s) for s in absent))
                 if r is not None]
     refusal_rate = (sum(1 for r in refusals if r) / len(refusals)) if refusals else 0.0
 
