@@ -36,12 +36,15 @@ def _quiet_db(monkeypatch):
 
 
 async def test_chitchat_route_returns_fixed_reply(monkeypatch):
+    from app.core.prompts import CHITCHAT_REPLY_TEXT
+
     monkeypatch.setattr(nodes, "classify_intent", _aval(
-        {"intent": "闲聊", "route": "chitchat", "trace": {"intent": "闲聊", "route": "chitchat"}}))
+        {"intent": "闲聊", "route": "fallback_script",
+         "trace": {"intent": "闲聊", "route": "fallback_script"}}))
     g, config = _graph()
     final = await g.ainvoke(_input("你好"), config)
-    assert final["answer"] == nodes.CHITCHAT_REPLY
-    assert final["route"] == "chitchat"
+    assert final["answer"] == CHITCHAT_REPLY_TEXT
+    assert final["route"] == "fallback_script"
 
 
 async def test_business_route_goes_straight_to_agent(monkeypatch):
@@ -85,7 +88,7 @@ async def test_knowledge_weak_evidence_falls_back_and_pools(monkeypatch):
 async def test_knowledge_strong_evidence_reaches_agent_with_citations(monkeypatch):
     citations = [{"n": 1, "id": 1, "section_path": "退货", "question": "能退吗", "answer": "7天"}]
     monkeypatch.setattr(nodes, "classify_intent", _aval(
-        {"intent": "退款退货", "route": "knowledge", "trace": {"route": "knowledge"}}))
+        {"intent": "商品咨询", "route": "knowledge", "trace": {"route": "knowledge"}}))
     monkeypatch.setattr(nodes, "forced_rag", _aval(
         {"evidence_strong": True, "evidence": "[1] 能退吗: 7天", "citations": citations,
          "trace": {"forced_rag": True, "evidence_top": 0.9}}))

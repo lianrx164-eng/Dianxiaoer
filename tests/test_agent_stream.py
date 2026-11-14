@@ -30,19 +30,21 @@ async def _collect(agen):
 
 
 async def test_stream_chitchat_emits_fixed_reply(monkeypatch):
+    from app.core.prompts import CHITCHAT_REPLY_TEXT
+
     monkeypatch.setattr(nodes, "classify_intent", _aval(
-        {"intent": "闲聊", "route": "chitchat", "trace": {"route": "chitchat"}}))
+        {"intent": "闲聊", "route": "fallback_script", "trace": {"route": "fallback_script"}}))
     monkeypatch.setattr(runtime, "get_graph",
                         lambda: build_graph(checkpointer=InMemorySaver()))
 
     events = await _collect(runtime.stream_turn("u1", "你好", None))
-    assert events[0] == {"type": "delta", "text": nodes.CHITCHAT_REPLY}
+    assert events[0] == {"type": "delta", "text": CHITCHAT_REPLY_TEXT}
     assert events[-1]["type"] == "done" and events[-1]["conversation_id"] == 7
 
 
 async def test_stream_agent_create_ticket_becomes_action_not_write(monkeypatch):
     monkeypatch.setattr(nodes, "classify_intent", _aval(
-        {"intent": "售后", "route": "business", "trace": {"route": "business"}}))
+        {"intent": "订单", "route": "business", "trace": {"route": "business"}}))
     calls = {"n": 0}
 
     async def fake_agent(state, config=None):

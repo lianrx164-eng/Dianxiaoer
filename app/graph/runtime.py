@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 # 会流式吐答复 token 的节点(其余节点的模型调用 token 不进 delta)
 ANSWER_NODES = {"agent_llm"}
 # 确定性节点把答复写在 state['answer'],整块作为 delta 吐出
-DETERMINISTIC_ANSWER_NODES = {"chitchat_reply", "complaint_reply", "fallback_reply", "cap_reply"}
+DETERMINISTIC_ANSWER_NODES = {"script_reply", "complaint_reply", "fallback_reply", "cap_reply"}
 
 _graph = None
 _checkpointer = None

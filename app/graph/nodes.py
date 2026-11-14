@@ -29,7 +29,6 @@ from app.tools.registry import get_all_tools
 
 logger = logging.getLogger(__name__)
 
-CHITCHAT_REPLY = CHITCHAT_REPLY_TEXT
 COMPLAINT_REPLY = COMPLAINT_REPLY_TEXT
 FALLBACK_REPLY = FALLBACK_REPLY_TEXT
 
@@ -53,12 +52,6 @@ def _history_text(state, max_messages: int = 6) -> str:
         if text:
             lines.append(f"{role}:{text}")
     return "\n".join(lines)
-
-
-async def chitchat_reply(state) -> dict:
-    """闲聊:固定话术,零模型调用。"""
-    return {"answer": CHITCHAT_REPLY,
-            "trace": trace_of(state, route="chitchat")}
 
 
 async def script_reply(state) -> dict:
