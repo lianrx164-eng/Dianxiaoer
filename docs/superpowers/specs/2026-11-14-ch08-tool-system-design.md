@@ -67,7 +67,7 @@ class ToolSpec:
 
 - `WRITE_TOOLS: set[str] = {"create_ticket"}`;`permission_for(name)` 只认这张表,不看 Server 声明。
 - `register(spec)`:重名先到者保留,后到丢弃并 `warning`。
-- `scan_builtin()`:幂等;`pkgutil.iter_modules(app.tools.builtin.__path__)` 逐模块 import,模块尾部 `registry.register(...)` 完成登记。`builtin_specs()` / `get_builtin_spec()` 惰性触发扫描,测试不必起 lifespan。
+- `scan_builtin()`:幂等;`pkgutil.iter_modules(app.tools.builtin.__path__)` 逐模块 import,模块尾部 `registry.register(...)` 完成登记。`builtin_specs()` 惰性触发扫描,测试不必起 lifespan。
 - `spec_from_langchain_tool(tool, *, source, ...)`:三样必齐的提取口径——`args_schema` 是 dict(MCP 适配器)直接用;否则取 `tool.tool_call_schema` 转 `model_json_schema()`(`InjectedToolArg` 自动排除,模型看不到 `conversation_id`)。
 - `async get_all_specs()`:内置在前;MCP 工具逐个合并,重名丢弃并 warning。每次调用现拉,不缓存工具清单。
 
@@ -92,7 +92,7 @@ class ToolSpec:
 - `fetch_mcp_specs()`:两台 Server 用 `asyncio.gather` 并发拉取,每台 `asyncio.wait_for(_get_tools_of(...), settings.mcp_discovery_timeout)`;单台超时/连不上 → `warning` + 跳过,不影响另一台。并发是为了让「两台都挂起」的等待上限仍是一次 3s,而不是 6s。
 - 每次拉取新建 session,不缓存清单:验收 3 的机制保证。
 - 两台 Server(`mcp_servers/logistics_server.py` / `aftersales_server.py`)各用 `FastMCP`,mock 数据用固定种子稳定;`MOCK_DELAY_SECONDS` 注入延迟(验收 6),`PORT` 覆盖端口。
-- 结果格式化只认我们侧登记:`FORMATTERS = {"query_logistics": _fmt_logistics, "query_warranty": _fmt_warranty, "query_return_status": _fmt_return}`;未登记工具透传。格式化挑回答用得上的字段、内部枚举码翻人话(如 `status_code: "IN_TRANSIT"` → `status: "运输中"`),剔除 `carrier_code`/`policy_ref` 这类内部编码。
+- 结果格式化只认我们侧登记:`FORMATTERS = {"query_logistics": _fmt_logistics, "query_warranty": _fmt_warranty, "query_return_status": _fmt_return}`;未登记工具透传。格式化挑回答用得上的字段、内部枚举码翻人话(如 `status_code: "IN_TRANSIT"` → `status: "运输中"`),剔除 `carrier_code`/`policy_ref` 这类内部编码,以及 logistics `trace` 中含「内部状态码」的行。
 
 ### 4.4 执行引擎(`app/tools/engine.py`)
 
@@ -145,6 +145,7 @@ async def execute_tool_call(
 - `_interrupt_event` 返回 `{"type": "interrupt", "conversation_id", "kind", **payload 除 type 外的字段}`;`select_order` 保留 `orders`,`confirm_ticket` 带 `preview`。
 - `event_frames` 按 `kind` 透传负载字段,不再写死 `orders`。
 - `run_turn`/`resume_turn` 返回的 `interrupt` 变为完整 payload dict;`AgentResponse.interrupt` 相应改为 `dict | None`。
+- `POST /api/actions/resume` 先读 `runtime.pending_interrupt(cid)` 校验:`order_id` 与 `confirmed` 都传或都不传、没有未决中断、载荷类型与暂停类型不符(如 `select_order` 暂停时传 `confirmed`)→ 400;只有类型匹配才进入续跑,避免把 dict 当订单号。
 - `ResumeRequest`:`conversation_id` 必填;`order_id: str | None`、`confirmed: bool | None`,两者至少一个,否则 400;`order_id` 非空时 resume 值仍是字符串,否则 `{"confirmed": bool}`。
 
 ### 4.7 意图第九类「人工」
@@ -180,6 +181,8 @@ demo_ticket_delay_seconds: float = 0.0
 ```
 
 `.env.example` 追加 `MCP_LOGISTICS_URL`、`MCP_AFTERSALES_URL`、`DEMO_TICKET_DELAY_SECONDS`(红线,动手前单独确认)。
+
+- 启停:Makefile `mcp-up` / `mcp-down`(nohup + pid 落 `data/*.pid`,已 gitignore);`scripts/dev.sh` 先 `make mcp-up` 再起 uvicorn,`make dev` 一条命令拉起全栈。
 
 - `sql/ch08-ddl.sql`:桌面 `ch_08.sql` 原样复制(无 ASCII `;` 注释问题,已核)。
 - `ToolAuditLog` 模型对齐 DDL,无外键;`repository.insert_tool_audit(...)` 尾部追加。

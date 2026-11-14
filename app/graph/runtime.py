@@ -148,9 +148,7 @@ async def pending_interrupt(conversation_id: int) -> dict | None:
 def _interrupt_event(cid: int, payload: dict) -> dict:
     ev = {"type": "interrupt", "conversation_id": cid,
           "kind": payload.get("type", "")}
-    for k in ("orders", "preview"):                 # 按中断类型透传负载
-        if payload.get(k) is not None:
-            ev[k] = payload[k]
+    ev.update({k: v for k, v in payload.items() if k != "type"})  # 按 spec 透传全部负载
     return ev
 
 

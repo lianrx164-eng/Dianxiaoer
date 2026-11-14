@@ -23,6 +23,13 @@ def test_turn_result_surfaces_interrupt_payload():
         "type": "confirm_ticket", "preview": {"ticket_type": "售后", "description": "x"}}
 
 
+def test_interrupt_event_passes_through_all_payload_fields():
+    ev = runtime._interrupt_event(5, {
+        "type": "confirm_ticket", "preview": {"x": 1}, "extra": "y"})
+    assert ev == {"type": "interrupt", "conversation_id": 5, "kind": "confirm_ticket",
+                  "preview": {"x": 1}, "extra": "y"}
+
+
 @pytest.mark.asyncio
 async def test_run_turn_creates_conversation_when_none(monkeypatch):
     async def fake_create(uid):

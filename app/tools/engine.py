@@ -102,6 +102,7 @@ async def execute_tool_call(
     name = tool_call.get("name") or ""
     tc_id = tool_call.get("id") or ""
     args = dict(tool_call.get("args") or {})
+    model_args = dict(args)          # 审计只记模型实际发来的参数,不含系统注入字段
     started = time.monotonic()
 
     def _run(ok: bool, content: str, status: str, retry_count: int = 0) -> ToolRun:
@@ -117,7 +118,7 @@ async def execute_tool_call(
     # ① 查工具
     if spec is None:
         run = _run(False, f"工具执行失败:未知工具 {name}", "失败")
-        await _audit(conversation_id, tc_id, name or "unknown", None, args, None,
+        await _audit(conversation_id, tc_id, name or "unknown", None, model_args, None,
                      "失败", f"未知工具 {name}", 0, run.duration_ms)
         return run
 
@@ -128,7 +129,7 @@ async def execute_tool_call(
             False,
             f"参数校验未通过:{verr}。请修正参数重新调用;缺少的信息请先向用户追问,不要编造。",
             "校验拦下")
-        await _audit(conversation_id, tc_id, name, spec, args, None,
+        await _audit(conversation_id, tc_id, name, spec, model_args, None,
                      "校验拦下", verr, 0, run.duration_ms)
         return run
 
@@ -136,7 +137,7 @@ async def execute_tool_call(
     if spec.permission == "write" and not confirmed:
         note = deny_note or "该写操作需要用户确认,未确认前拒绝执行。请勿再次发起,除非用户明确要求。"
         run = _run(False, f"建工单未执行:{note}", "权限拒绝")
-        await _audit(conversation_id, tc_id, name, spec, args, None,
+        await _audit(conversation_id, tc_id, name, spec, model_args, None,
                      "权限拒绝", note, 0, run.duration_ms)
         return run
 
@@ -151,7 +152,7 @@ async def execute_tool_call(
             result = await asyncio.wait_for(spec.tool.ainvoke(args), timeout=tool_timeout)
             content = _format_content(spec, result)
             run = _run(True, content, "成功", attempt)
-            await _audit(conversation_id, tc_id, name, spec, args, _summarize(content),
+            await _audit(conversation_id, tc_id, name, spec, model_args, _summarize(content),
                          "成功", None, attempt, run.duration_ms)
             return run
         except _TRANSIENT as e:
@@ -169,7 +170,7 @@ async def execute_tool_call(
                 f"工具暂时不可用:{'执行超时' if is_timeout else type(e).__name__},"
                 "请稍后再试或如实告知用户。",
                 status, attempt)
-            await _audit(conversation_id, tc_id, name, spec, args, None, status,
+            await _audit(conversation_id, tc_id, name, spec, model_args, None, status,
                          type(e).__name__, attempt, run.duration_ms)
             return run
         except Exception as e:  # noqa: BLE001 业务/未知异常:不重试,如实回灌
@@ -178,6 +179,6 @@ async def execute_tool_call(
                 False,
                 f"工具暂时不可用:{type(e).__name__}。请如实告知用户,不要编造结果。",
                 "失败", attempt)
-            await _audit(conversation_id, tc_id, name, spec, args, None, "失败",
+            await _audit(conversation_id, tc_id, name, spec, model_args, None, "失败",
                          f"{type(e).__name__}: {e}"[:500], attempt, run.duration_ms)
             return run

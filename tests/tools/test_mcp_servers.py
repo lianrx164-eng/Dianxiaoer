@@ -1,6 +1,7 @@
 """ch08 MCP Server 集成测试:真起子进程 → adapters client 列工具 + 真调。
 连不上视为环境问题直接 fail(两台 Server 是本章交付物,不 skip)。"""
 import os
+import pathlib
 import socket
 import subprocess
 import sys
@@ -66,3 +67,45 @@ async def test_invoke_logistics_stable_mock(mcp_procs):
         return str(result)
 
     assert text(r1) == text(r2) and "status_code" in text(r1)
+
+
+def _start_server(path, port: int):
+    env = {**os.environ, "PYTHONUTF8": "1", "PORT": str(port)}
+    return subprocess.Popen([sys.executable, str(path)], env=env)
+
+
+async def test_tool_added_after_server_restart_becomes_visible(tmp_path):
+    """验收 3:Server 侧加工具、只重启 Server,同一个 client 下一次 get_tools 就能看到。"""
+    src = pathlib.Path("mcp_servers/logistics_server.py").read_text(encoding="utf-8")
+    marker = 'if __name__ == "__main__":'
+    probe_src = src.replace(marker, (
+        "\n\n@mcp.tool()\n"
+        "async def ping_probe() -> dict:\n"
+        '    """测试探针工具。"""\n'
+        '    return {"ok": True}\n\n') + marker)
+    probe = tmp_path / "logistics_with_probe.py"
+    probe.write_text(probe_src, encoding="utf-8")
+
+    port = 18301
+    client = MultiServerMCPClient({
+        "logistics": {"transport": "streamable_http",
+                      "url": f"http://127.0.0.1:{port}/mcp"},
+    }, handle_tool_errors=False)
+
+    p1 = _start_server("mcp_servers/logistics_server.py", port)
+    try:
+        _wait_port(port)
+        names = {t.name for t in await client.get_tools(server_name="logistics")}
+        assert "ping_probe" not in names
+    finally:
+        p1.terminate()
+        p1.wait(timeout=5)
+
+    p2 = _start_server(probe, port)
+    try:
+        _wait_port(port)
+        names = {t.name for t in await client.get_tools(server_name="logistics")}
+        assert "ping_probe" in names
+    finally:
+        p2.terminate()
+        p2.wait(timeout=5)

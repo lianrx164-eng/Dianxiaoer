@@ -212,3 +212,4 @@ async def test_inject_conversation_after_validation(audits):
         {"name": "create_ticket", "args": {"description": "x"}, "id": "c1"},
         7, {"create_ticket": spec}, confirmed=True)
     assert run.ok is True and seen.get("conversation_id") == 7
+    assert audits[-1]["arguments"] == {"description": "x"}   # 审计不记系统注入字段
