@@ -75,6 +75,8 @@ def _graph_input(user_id: str, message: str, cid: int, prev_messages: list | Non
         "intent": "", "route": "", "evidence": "", "citations": [],
         "evidence_strong": False, "answer": "", "steps": 0, "tokens_used": 0,
         "suggested_actions": [], "trace": {},
+        "resolved_query": "", "intent_confidence": 0.0,
+        "order_id": "", "order_data": {},
     }
 
 

@@ -18,6 +18,8 @@ async def test_run_turn_creates_conversation_when_none(monkeypatch):
 
         async def ainvoke(self, inp, config, durability=None):
             assert inp["trace"] == {}
+            assert inp["resolved_query"] == "" and inp["intent_confidence"] == 0.0
+            assert inp["order_id"] == "" and inp["order_data"] == {}
             return {"answer": "hi", "messages": [], "conversation_id": inp["conversation_id"]}
 
     monkeypatch.setattr(runtime.repository, "create_conversation", fake_create)
@@ -55,6 +57,8 @@ async def test_stream_turn_maps_events(monkeypatch):
 
         async def astream(self, inp, config, stream_mode=None, durability=None):
             assert inp["trace"] == {} and inp["evidence"] == ""
+            assert inp["resolved_query"] == "" and inp["intent_confidence"] == 0.0
+            assert inp["order_id"] == "" and inp["order_data"] == {}
             yield ("messages", (AIMessage("已"), {"langgraph_node": "agent_llm"}))
             yield ("messages", (AIMessage("发货"), {"langgraph_node": "agent_llm"}))
             yield ("messages", (AIMessage("订单"), {"langgraph_node": "classify_intent"}))
