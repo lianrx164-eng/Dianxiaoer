@@ -136,3 +136,103 @@ async def test_failed_turn_writes_no_mysql_and_retry_not_duplicated(monkeypatch)
     snap = await g.aget_state({"configurable": {"thread_id": "7"}})
     assert len(snap.values.get("messages", [])) == 1   # 重试复用 message id,不叠重复
     assert writes == []                                # 失败轮不落 MySQL 半条记录
+
+
+class _Intr:
+    def __init__(self, value):
+        self.value = value
+
+
+@pytest.mark.asyncio
+async def test_stream_turn_emits_interrupt_event(monkeypatch):
+    async def fake_create(uid):
+        return 9
+
+    class FakeGraph:
+        async def aget_state(self, config):
+            return type("S", (), {"values": {}, "interrupts": ()})()
+
+        async def astream(self, inp, config, stream_mode=None):
+            yield ("updates", {"fetch_order": None})
+            yield ("updates", {"__interrupt__": (_Intr({
+                "type": "select_order",
+                "orders": [{"order_id": "1001"}]}),)})
+
+    monkeypatch.setattr(runtime.repository, "create_conversation", fake_create)
+    monkeypatch.setattr(runtime, "get_graph", lambda: FakeGraph())
+    events = [e async for e in runtime.stream_turn("u1", "我要退款", None)]
+    intr = [e for e in events if e["type"] == "interrupt"]
+    assert intr and intr[0]["kind"] == "select_order"
+    assert intr[0]["orders"] == [{"order_id": "1001"}]
+    assert intr[0]["conversation_id"] == 9          # 首轮无 done,也要能续跑
+    assert not [e for e in events if e["type"] == "done"]
+
+
+@pytest.mark.asyncio
+async def test_stream_turn_reemits_pending_interrupt_without_new_turn(monkeypatch):
+    async def fake_get(cid):
+        return object()
+
+    class FakeGraph:
+        async def aget_state(self, config):
+            return type("S", (), {"values": {}, "interrupts": (_Intr({
+                "type": "select_order",
+                "orders": [{"order_id": "1002"}]}),)})()
+
+        async def astream(self, *a, **k):
+            raise AssertionError("有未决中断时不应启动新一轮")
+
+    monkeypatch.setattr(runtime.repository, "get_conversation", fake_get)
+    monkeypatch.setattr(runtime, "get_graph", lambda: FakeGraph())
+    events = [e async for e in runtime.stream_turn("u1", "算了查物流", 5)]
+    assert events == [{"type": "interrupt", "conversation_id": 5,
+                       "kind": "select_order",
+                       "orders": [{"order_id": "1002"}]}]
+
+
+@pytest.mark.asyncio
+async def test_resume_turn_drives_command(monkeypatch):
+    from langgraph.types import Command
+
+    seen = {}
+
+    class FakeGraph:
+        async def aget_state(self, config):
+            return type("S", (), {"values": {}})()
+
+        async def ainvoke(self, inp, config):
+            seen["is_command"] = isinstance(inp, Command)
+            seen["resume"] = getattr(inp, "resume", None)
+            return {"answer": "这一单可以退款", "messages": []}
+
+    async def fake_get(cid):
+        return object()
+
+    monkeypatch.setattr(runtime.repository, "get_conversation", fake_get)
+    monkeypatch.setattr(runtime, "get_graph", lambda: FakeGraph())
+    out = await runtime.resume_turn(5, "1001")
+    assert seen["is_command"] and seen["resume"] == "1001"
+    assert out["conversation_id"] == 5
+    assert out["state"]["answer"] == "这一单可以退款"
+
+
+@pytest.mark.asyncio
+async def test_stream_resume_uses_command(monkeypatch):
+    from langgraph.types import Command
+
+    seen = {}
+
+    class FakeGraph:
+        async def astream(self, inp, config, stream_mode=None):
+            seen["is_command"] = isinstance(inp, Command)
+            seen["resume"] = getattr(inp, "resume", None)
+            yield ("updates", {"agent_llm": {"messages": []}})
+
+    async def fake_get(cid):
+        return object()
+
+    monkeypatch.setattr(runtime.repository, "get_conversation", fake_get)
+    monkeypatch.setattr(runtime, "get_graph", lambda: FakeGraph())
+    events = [e async for e in runtime.stream_resume(5, "1001")]
+    assert seen["is_command"] and seen["resume"] == "1001"
+    assert events[-1] == {"type": "done", "conversation_id": 5}
