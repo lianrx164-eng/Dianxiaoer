@@ -25,7 +25,7 @@ async def test_classify_returns_schema_value(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_classify_falls_back_to_chitchat_on_error(monkeypatch):
+async def test_classify_returns_unknown_on_error_so_routing_falls_back_to_agent(monkeypatch):
     monkeypatch.setattr(
         intent, "structured_model", lambda schema: _FakeModel(exc=RuntimeError("boom")))
-    assert await intent.classify("随便说点什么") == "闲聊"
+    assert await intent.classify("订单1001到哪了") == "未知"

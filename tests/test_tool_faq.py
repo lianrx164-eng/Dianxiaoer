@@ -12,7 +12,7 @@ async def test_query_faq_passes_keyword_through(monkeypatch):
         return []
 
     monkeypatch.setattr("app.core.query_understanding.understand", fake_understand)
-    monkeypatch.setattr("app.tools.business.retrieval.search_knowledge", fake_search)
+    monkeypatch.setattr("app.core.retrieval.search_knowledge", fake_search)
     out = await query_faq.ainvoke({"keyword": "退货"})
     assert seen["query"] == "退货"
     assert out["sufficient"] is False and out["source"] == "retrieval_low_conf"

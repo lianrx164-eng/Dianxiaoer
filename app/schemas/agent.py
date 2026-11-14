@@ -26,3 +26,5 @@ class AgentResponse(BaseModel):
     tool_calls: list[ToolCallView]
     tool_results: list[ToolResultView]
     suggested_actions: list = Field(default_factory=list)
+    steps: int = 0
+    trace: dict = Field(default_factory=dict)

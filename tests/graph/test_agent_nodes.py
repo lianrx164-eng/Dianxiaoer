@@ -48,6 +48,7 @@ async def test_agent_llm_accumulates_steps_and_tokens(monkeypatch):
     out = await nodes.agent_llm({"messages": [HumanMessage("hi")], "steps": 1, "tokens_used": 100})
     assert out["steps"] == 2
     assert out["tokens_used"] == 115
+    assert out["trace"]["steps"] == 2
     assert out["messages"][0] is ai
 
 
@@ -64,6 +65,21 @@ async def test_agent_tools_executes_normal_tool(monkeypatch):
     out = await nodes.agent_tools({"messages": [ai], "conversation_id": 5})
     assert out["messages"][0].name == "query_logistics"
     assert not out.get("suggested_actions")
+
+
+@pytest.mark.asyncio
+async def test_agent_tools_dedupes_repeated_create_ticket(monkeypatch):
+    async def fake_exec(tc, cid):
+        raise AssertionError("create_ticket 不应被执行")
+
+    monkeypatch.setattr(nodes, "execute_tool_call", fake_exec)
+    ai = AIMessage("", tool_calls=[
+        {"name": "create_ticket", "args": {"description": "屏幕碎了", "ticket_type": "售后"}, "id": "t1"},
+        {"name": "create_ticket", "args": {"description": "屏幕碎了", "ticket_type": "售后"}, "id": "t2"},
+    ])
+    out = await nodes.agent_tools({"messages": [ai], "conversation_id": 5})
+    assert len(out["suggested_actions"]) == 1
+    assert len(out["messages"]) == 2          # 每个 tool_call 都要有应答,不能悬空
 
 
 @pytest.mark.asyncio

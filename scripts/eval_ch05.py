@@ -21,6 +21,13 @@ async def agent(client, msg):
 async def main():
     results = []
     async with httpx.AsyncClient(timeout=180, trust_env=False) as c:
+        # 验收1:政策类走知识路,forced_rag 留痕(trace 由 /api/agent 暴露)
+        b = await agent(c, "退货政策是什么")
+        tr = b.get("trace", {})
+        results.append(("验收1 强制检索(trace)",
+                        b.get("route") == "knowledge" and tr.get("forced_rag") is True,
+                        {"route": b.get("route"), "forced_rag": tr.get("forced_rag")}))
+
         # 验收2:业务数据类,Agent 自调 query_logistics
         b = await agent(c, "订单1001的物流到哪了")
         names = [tc["name"] for tc in b["tool_calls"]]
@@ -38,17 +45,17 @@ async def main():
                         not b["tool_calls"] and b["answer"].startswith("你好呀"),
                         b["answer"][:18]))
 
-        # 验收5:复合问 ReAct 多步,且先查订单再查物流
+        # 验收5:复合问 ReAct 多步,且先查订单再查物流;trace 步数 > 1
         b = await agent(c, "订单1001买的是什么?顺便看看物流到哪了")
         names = [tc["name"] for tc in b["tool_calls"]]
         ordered = ("query_order" in names and "query_logistics" in names
                    and names.index("query_order") < names.index("query_logistics"))
-        results.append(("验收5 ReAct 多步(订单→物流)", ordered, names))
+        results.append(("验收5 ReAct 多步(订单→物流)",
+                        ordered and b.get("steps", 0) > 1,
+                        {"tools": names, "steps": b.get("steps")}))
 
     for name, ok, detail in results:
         print(f"{'✅' if ok else '❌'} {name} -> {detail}")
-    print("\n验收1(强制检索节点)看服务日志:问政策类问题后应出现 "
-          "`ch05 turn ... route=knowledge trace={... 'forced_rag': True ...}`")
     return all(ok for _, ok, _ in results)
 
 

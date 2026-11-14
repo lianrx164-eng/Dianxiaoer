@@ -4,8 +4,7 @@ from typing import Annotated, Literal
 from langchain_core.tools import InjectedToolArg, tool
 from pydantic import BaseModel, Field
 
-from app.config import settings
-from app.core import query_understanding, retrieval, selfcheck
+from app.core import evidence
 from app.db import repository
 
 
@@ -74,39 +73,8 @@ class FaqInput(BaseModel):
 async def query_faq(keyword: str, category: str | None = None) -> dict:
     """查询常见问题/政策知识库(混合检索+重排)。用于政策、规则、时效、费用、商品手册等通用问题。
     返回带编号证据供作答引用;证据不足时返回 sufficient=False,请据此向用户拒答。"""
-    u = await query_understanding.understand(keyword)
-    query = u["standard"]
-    bm25_query = query + (" " + " ".join(u["expanded"]) if u["expanded"] else "")
-
-    hits = await retrieval.search_knowledge(
-        query, strategy="hybrid_rerank", category=category, bm25_query=bm25_query)
-    if category and not hits:
-        # 模型给的分类名不是库里的精确 category 时,退回全库检索,避免误拒答
-        hits = await retrieval.search_knowledge(
-            query, strategy="hybrid_rerank", bm25_query=bm25_query)
-
-    top = hits[0].get("rerank_score", 0.0) if hits else 0.0
-    if not hits or top < settings.rerank_min_score:
-        return {"sufficient": False, "source": "retrieval_low_conf",
-                "reason": f"检索证据不足(top={top:.3f})", "citations": []}
-
-    ev_texts = [f"{h['question']} {h['answer']}" for h in hits]
-    chk = await selfcheck.check_sufficient(query, ev_texts)
-    if not chk["useful"]:
-        return {"sufficient": False, "source": "self_check",
-                "reason": chk["reason"], "citations": []}
-
-    arranged = retrieval.arrange_head_tail(hits)
-    citations = [
-        {"n": i + 1, "id": h["id"], "chunk_id": h["id"],
-         "section_path": h["section_path"],
-         "question": h["question"], "answer": h["answer"],
-         "content_type": h["content_type"]}
-        for i, h in enumerate(arranged)
-    ]
-    evidence = "\n".join(
-        f"[{c['n']}] {c['question']}: {c['answer']}" for c in citations)
-    return {"sufficient": True, "evidence": evidence, "citations": citations}
+    result = await evidence.gather_evidence(keyword, category=category)
+    return {k: v for k, v in result.items() if k != "top"}
 
 
 @tool
@@ -118,4 +86,4 @@ async def create_ticket(
     """当用户问题需要人工介入(投诉、无法自助解决、明确要求人工)时,创建人工工单。
     description 填用户问题描述,ticket_type 从 售后/投诉/咨询 中选。"""
     ticket_no = await repository.create_ticket(conversation_id, description, ticket_type)
-    return {"ticket_no": ticket_no, "status": "已转人工"}
+    return {"ticket_no": ticket_no, "status": "已创建"}

@@ -180,6 +180,8 @@ scripts/eval_ch05.py        # 新:5 验收端到端评估
 - **D8 步数封顶独立出口 `cap_reply`**:封顶时补合成 ToolMessage 并回兜底话术,不写低置信池(与检索证据无关)。
 - **D9 trace 用普通 dict,每轮输入重置**:避免上一轮的 `forced_rag` 等键残留,污染验收 1 的日志证据。
 - **D10 log 节点回填确定性答复到 messages**:chitchat/complaint/fallback 的答复不经过模型,若不回填,checkpointer 下一轮历史会缺 assistant 回合。
+- **D11 create_ticket 不再改会话状态**:建工单与转人工是两件事;ch02 的「建单即把会话置为已转人工」随本章移除,会话状态只由转人工动作改变(本章转人工仍是前端模拟)。
+- **D12 意图分类失败回「未知」**:由 `route_by_intent` 兜底到 business 交 Agent 应对,不再伪装成闲聊固定话术;与「未知意图归 business」的兜底哲学一致。
 
 ## 12. 风险闸(fail-fast)
 

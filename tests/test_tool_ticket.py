@@ -22,6 +22,7 @@ async def test_create_ticket_injects_conversation_id_and_writes(db_session_facto
         {"description": "商品损坏要退货", "ticket_type": "售后", "conversation_id": cid}
     )
     assert r["ticket_no"].startswith("T")
+    assert r["status"] == "已创建"          # 建工单不等于转人工
     async with db_session_factory() as s:
         t = await s.get(Ticket, r["ticket_no"])
         assert t is not None and t.conversation_id == cid

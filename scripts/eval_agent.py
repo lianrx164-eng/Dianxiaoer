@@ -27,6 +27,14 @@ def _actions(body):
     return {a["type"] for a in body.get("suggested_actions", [])}
 
 
+def _ticket_calls(body):
+    return sum(1 for tc in body.get("tool_calls", []) if tc["name"] == "create_ticket")
+
+
+def _no_claim(body):
+    return not any(k in body.get("answer", "") for k in ("已提交", "已登记", "已创建"))
+
+
 # (用户问法, 判定函数, 期望说明)
 SAMPLES = [
     ("订单 1001 的物流到哪了",
@@ -41,6 +49,9 @@ SAMPLES = [
      lambda b: "query_order" in _names(b), "query_order"),
     ("我要投诉,给我登记一下",
      lambda b: {"transfer_human", "create_ticket"} <= _actions(b), "两个可选项,不建单"),
+    ("我的猫爬架坏了,想登记售后工单,顺便查下订单1001",
+     lambda b: (_ticket_calls(b) == 1 and "create_ticket" in _actions(b) and _no_claim(b)),
+     "R3:create_ticket 只提议一次、不重复调、不声称已提交"),
     ("今天天气怎么样",
      lambda b: not _names(b) and bool(b.get("answer")), "不调工具"),
 ]

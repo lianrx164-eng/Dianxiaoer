@@ -1,9 +1,10 @@
 from langchain_core.messages import AIMessage
 
 from app.config import settings
+from app.core.intent import Intent
 
 # 七类意图 → 四出口(写死在代码里的分流规则,spec §3.1)
-INTENT_TO_ROUTE: dict[str, str] = {
+INTENT_TO_ROUTE: dict[Intent, str] = {
     "商品咨询": "knowledge",
     "退款退货": "knowledge",
     "物流": "business",

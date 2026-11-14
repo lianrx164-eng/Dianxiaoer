@@ -15,6 +15,8 @@ def _fake_state():
         "answer": "",
         "messages": [HumanMessage("订单 1001 到哪了"), ai, tm, AIMessage("订单 1001 正在运输中。")],
         "suggested_actions": [{"type": "transfer_human"}],
+        "steps": 2,
+        "trace": {"route": "business", "forced_rag": False},
     }
 
 
@@ -31,6 +33,8 @@ def test_agent_endpoint_returns_tool_trace(monkeypatch):
     assert body["tool_calls"][0]["name"] == "query_logistics"
     assert body["tool_results"][0]["ok"] is True
     assert body["suggested_actions"] == [{"type": "transfer_human"}]
+    assert body["steps"] == 2
+    assert body["trace"]["route"] == "business"
 
 
 def test_agent_endpoint_404_on_unknown_conversation(monkeypatch):

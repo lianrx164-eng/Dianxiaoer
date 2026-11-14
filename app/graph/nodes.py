@@ -3,8 +3,8 @@ import logging
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.config import settings
+from app.core import evidence
 from app.core import intent as intent_mod
-from app.core import query_understanding, retrieval, selfcheck
 from app.core.llm import get_chat_model
 from app.core.memory import trim_history
 from app.core.prompts import (
@@ -14,7 +14,7 @@ from app.core.prompts import (
     FALLBACK_REPLY_TEXT,
 )
 from app.db import repository
-from app.graph.routing import route_by_intent
+from app.graph.routing import INTENT_TO_ROUTE
 from app.graph.state import trace_of
 from app.tools.infra import execute_tool_call
 from app.tools.registry import get_all_tools
@@ -85,47 +85,22 @@ async def coref(state) -> dict:
 async def classify_intent(state) -> dict:
     """意图识别:单标签七类,并落四出口供日志与下游使用。"""
     intent = await intent_mod.classify(_user_text(state))
-    route = route_by_intent({"intent": intent})
+    route = INTENT_TO_ROUTE.get(intent, "business")
     return {"intent": intent, "route": route,
             "trace": trace_of(state, intent=intent, route=route)}
 
 
 async def forced_rag(state) -> dict:
-    """知识类强制检索(复用 ch03/04 检索器):产出编号证据 + 证据强弱信号。
-    复刻 query_faq 的两道生成前证据闸(检索分闸 + 自评闸),把结果落进 State。"""
-    query_raw = _user_text(state)
-    u = await query_understanding.understand(query_raw)
-    query = u["standard"]
-    bm25_query = query + (" " + " ".join(u["expanded"]) if u["expanded"] else "")
-
-    hits = await retrieval.search_knowledge(
-        query, strategy="hybrid_rerank", bm25_query=bm25_query)
-    top = hits[0].get("rerank_score", 0.0) if hits else 0.0
-
-    # 机械闸:无召回 or 最高分低于阈值
-    if not hits or top < settings.rerank_min_score:
+    """知识类强制检索:复用统一证据管线(检索分闸 + 自评闸),结果落进 State。"""
+    r = await evidence.gather_evidence(_user_text(state))
+    if not r["sufficient"]:
+        extra = {"self_check": r["reason"]} if r["source"] == "self_check" else {}
         return {"evidence_strong": False,
-                "trace": trace_of(state, forced_rag=True, evidence_top=top,
-                                  gate="retrieval_low_conf")}
-
-    # 语义闸:生成前自评证据够不够
-    ev_texts = [f"{h['question']} {h['answer']}" for h in hits]
-    chk = await selfcheck.check_sufficient(query, ev_texts)
-    if not chk["useful"]:
-        return {"evidence_strong": False,
-                "trace": trace_of(state, forced_rag=True, evidence_top=top,
-                                  gate="self_check", self_check=chk["reason"])}
-
-    arranged = retrieval.arrange_head_tail(hits)
-    citations = [
-        {"n": i + 1, "id": h["id"], "chunk_id": h["id"],
-         "section_path": h["section_path"], "question": h["question"],
-         "answer": h["answer"], "content_type": h["content_type"]}
-        for i, h in enumerate(arranged)
-    ]
-    evidence = "\n".join(f"[{c['n']}] {c['question']}: {c['answer']}" for c in citations)
-    return {"evidence_strong": True, "evidence": evidence, "citations": citations,
-            "trace": trace_of(state, forced_rag=True, evidence_top=top)}
+                "trace": trace_of(state, forced_rag=True, evidence_top=r["top"],
+                                  gate=r["source"], **extra)}
+    return {"evidence_strong": True, "evidence": r["evidence"],
+            "citations": r["citations"],
+            "trace": trace_of(state, forced_rag=True, evidence_top=r["top"])}
 
 
 async def confidence_check(state) -> dict:
@@ -155,24 +130,30 @@ async def agent_llm(state, config=None) -> dict:
     model = get_chat_model(streaming=True).bind_tools(get_all_tools())
     ai: AIMessage = await model.ainvoke(_agent_messages(state), config)
     usage = ai.usage_metadata or {}
-    return {"messages": [ai],
-            "steps": state.get("steps", 0) + 1,
-            "tokens_used": state.get("tokens_used", 0) + usage.get("total_tokens", 0)}
+    steps = state.get("steps", 0) + 1
+    return {"messages": [ai], "steps": steps,
+            "tokens_used": state.get("tokens_used", 0) + usage.get("total_tokens", 0),
+            "trace": trace_of(state, steps=steps,
+                              tokens_used=state.get("tokens_used", 0) + usage.get("total_tokens", 0))}
 
 
 async def agent_tools(state) -> dict:
     """ReAct 行动步:执行工具并回灌结果。create_ticket 拦截为『提议』——不写库,
-    转成前端可选项,并回合成 ToolMessage 让模型收敛(真正写库在按钮端点)。"""
+    转成前端可选项,并回合成 ToolMessage 让模型收敛(真正写库在按钮端点)。
+    模型若重复调 create_ticket,只保留一份可选项。"""
     last = state["messages"][-1]
     tool_msgs = []
     actions = list(state.get("suggested_actions") or [])
+    seen = {(a["type"], str(a.get("draft"))) for a in actions}
     for tc in last.tool_calls:
         if tc["name"] == "create_ticket":
             args = tc.get("args") or {}
-            actions.append({"type": "create_ticket", "draft": {
-                "description": args.get("description", ""),
-                "ticket_type": args.get("ticket_type", "咨询"),
-            }})
+            draft = {"description": args.get("description", ""),
+                     "ticket_type": args.get("ticket_type", "咨询")}
+            key = ("create_ticket", str(draft))
+            if key not in seen:
+                actions.append({"type": "create_ticket", "draft": draft})
+                seen.add(key)
             tool_msgs.append(ToolMessage(
                 content=("已把『建工单』选项交给用户自行确认,尚未创建工单。"
                          "请用一句话请用户点击下方『建工单』按钮提交;"
@@ -204,9 +185,9 @@ async def log_node(state) -> dict:
     """日志记录:留痕 intent/route/trace,并落 MySQL 一条 assistant 消息(审计)。
     确定性出口的答复不经模型,这里回填一条 AIMessage,保证 checkpointer 下一轮历史完整。"""
     logger.info(
-        "ch05 turn conv=%s intent=%s route=%s trace=%s",
+        "ch05 turn conv=%s intent=%s route=%s steps=%s trace=%s",
         state.get("conversation_id"), state.get("intent"), state.get("route"),
-        state.get("trace", {}),
+        state.get("steps", 0), state.get("trace", {}),
     )
     answer = resolve_answer(state)
     if state.get("conversation_id"):
