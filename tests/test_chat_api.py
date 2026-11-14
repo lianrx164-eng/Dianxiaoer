@@ -11,7 +11,7 @@ from app.main import app
 def parse_sse(text: str) -> dict:
     """把 SSE 文本解析成 {tools, deltas, actions, done, error, finished}。"""
     out = {"tools": [], "deltas": "", "actions": [], "done": None,
-           "error": None, "finished": False}
+           "error": None, "finished": False, "interrupts": []}
     lines = text.splitlines()
     i = 0
     while i < len(lines):
@@ -31,6 +31,8 @@ def parse_sse(text: str) -> dict:
                     out["tools"].append(ev["name"])
                 elif ev.get("event") == "actions":
                     out["actions"] = ev["items"]
+                elif ev.get("event") == "interrupt":
+                    out["interrupts"].append(ev)
                 elif ev.get("event") == "done":
                     out["done"] = ev
                 elif "delta" in ev:
@@ -109,3 +111,18 @@ async def test_chat_upstream_error_emits_error_frame(monkeypatch):
     assert status == 200
     assert sse["error"] == "上游模型暂时不可用,请稍后重试"
     assert sse["finished"] is False
+
+
+async def test_chat_maps_interrupt_frame(monkeypatch):
+    async def fake_stream(*a, **k):
+        yield {"type": "interrupt", "conversation_id": 5,
+               "kind": "select_order", "orders": [{"order_id": "1001"}]}
+
+    monkeypatch.setattr(runtime, "stream_turn", fake_stream)
+    status, text = await _post_chat({"user_id": "u1", "message": "我要退款"})
+    sse = parse_sse(text)
+    assert status == 200
+    assert sse["interrupts"] == [{
+        "event": "interrupt", "conversation_id": 5,
+        "kind": "select_order", "orders": [{"order_id": "1001"}]}]
+    assert sse["done"] is None           # 图暂停,没有 done 事件([DONE] 只是流终止)

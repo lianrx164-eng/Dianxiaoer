@@ -47,6 +47,7 @@ async def run_agent(req: AgentRequest) -> AgentResponse:
         tool_calls=calls,
         tool_results=results,
         suggested_actions=state.get("suggested_actions", []),
+        interrupt=out.get("interrupt"),
         steps=state.get("steps", 0),
         trace=state.get("trace", {}),
     )
