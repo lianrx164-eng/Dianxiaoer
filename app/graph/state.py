@@ -12,6 +12,10 @@ def trace_of(state: dict, **updates) -> dict:
 
 class ConversationState(TypedDict, total=False):
     messages: Annotated[list[AnyMessage], add_messages]  # 跨轮历史,checkpointer 续接
+    history_messages: list[AnyMessage]  # 本轮精简历史(DB 已落层2+层1,带 db-id 锚点)
+    summary: str                        # conversations.summary 投影
+    summary_upto_msg_id: int            # 梗概覆盖到哪条
+    layer1_from_msg_id: int             # 层1起点;id > 此值为原文
     user_id: str
     conversation_id: int
     intent: str            # 八类之一(含「其他」)

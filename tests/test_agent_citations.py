@@ -2,6 +2,7 @@
 import pytest
 from langchain_core.messages import AIMessage
 from langgraph.checkpoint.memory import InMemorySaver
+from runtime_fakes import patch_runtime_repo
 
 from app.graph import nodes, runtime
 from app.graph.build import build_graph
@@ -23,6 +24,7 @@ def _repo(monkeypatch):
 
     monkeypatch.setattr(runtime.repository, "create_conversation", fake_create)
     monkeypatch.setattr(runtime.repository, "append_message", fake_append)
+    patch_runtime_repo(monkeypatch, runtime)
 
 
 async def _events(monkeypatch):

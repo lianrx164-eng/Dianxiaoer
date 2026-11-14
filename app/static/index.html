@@ -22,13 +22,71 @@
   }
 
   .app {
-    width: min(880px, 94vw);
+    width: min(1104px, 96vw);
     height: min(820px, 84vh);
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     background: #fdf6ea;
     border: 3px solid #1c1c1c;
     box-shadow: 12px 12px 0 #1c1c1c;
+  }
+
+  .chat { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+  .sidebar {
+    width: 224px;
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border-right: 3px solid #1c1c1c;
+    background: #f3ead9;
+  }
+  .sidebar-head {
+    padding: 12px 14px;
+    font-weight: 700;
+    font-size: 14px;
+    letter-spacing: 1px;
+    border-bottom: 3px solid #1c1c1c;
+    background: #fff8ec;
+  }
+  .conv-list { flex: 1; overflow-y: auto; }
+  .conv-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: 0;
+    border-bottom: 2px solid rgba(28, 28, 28, 0.18);
+    background: transparent;
+    padding: 10px 12px;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+  }
+  .conv-item:hover { background: #ffe9c2; }
+  .conv-item.active { background: #ffd9a8; }
+  .conv-preview {
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .conv-meta {
+    margin-top: 4px;
+    font-size: 11px;
+    color: #6b5d4a;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .conv-badge {
+    background: #f7941d;
+    color: #1c1c1c;
+    border: 1px solid #1c1c1c;
+    padding: 0 5px;
+    font-size: 10px;
+    line-height: 1.5;
   }
 
   .topbar {
@@ -325,6 +383,11 @@
   .ticket-form .row-btns { display: flex; justify-content: flex-end; gap: 10px; }
   .ticket-form .btn { box-shadow: 3px 3px 0 #1c1c1c; padding: 8px 14px; }
 
+  @media (max-width: 780px) {
+    .sidebar { display: none; }
+    .app { flex-direction: column; }
+  }
+
   @media (max-width: 560px) {
     body { padding: 0; place-items: stretch; }
     .app { width: 100%; height: 100vh; border: 0; box-shadow: none; }
@@ -334,6 +397,11 @@
 </head>
 <body>
 <main class="app">
+  <aside id="sidebar" class="sidebar">
+    <div class="sidebar-head">会话</div>
+    <div id="convList" class="conv-list"></div>
+  </aside>
+  <div class="chat">
   <header class="topbar">
     <div class="brand">
       <div class="logo" aria-hidden="true">
@@ -371,6 +439,7 @@
     </form>
     <p class="note">小喵是 AI 助手,涉及具体订单会为你转接人工核实</p>
   </footer>
+  </div>
 </main>
 
 <script>
@@ -388,6 +457,7 @@
   const inputEl = document.getElementById('input');
   const sendEl = document.getElementById('send');
   const newChatEl = document.getElementById('newChat');
+  const convListEl = document.getElementById('convList');
 
   const USER_KEY = 'mewhelp_user_id';
   const CONV_KEY = 'mewhelp_conversation_id';
@@ -417,6 +487,7 @@
   })();
 
   let busy = false;
+  let convItems = [];
 
   function saveConversationId(id) {
     conversationId = id == null ? null : String(id);
@@ -424,6 +495,83 @@
       if (conversationId) localStorage.setItem(CONV_KEY, conversationId);
       else localStorage.removeItem(CONV_KEY);
     } catch (e) { /* 隐私模式 */ }
+  }
+
+  function convDate(iso) {
+    if (!iso) return '';
+    return String(iso).slice(0, 10);
+  }
+
+  function renderConversations() {
+    convListEl.innerHTML = '';
+    for (const item of convItems) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'conv-item' + (String(item.id) === String(conversationId) ? ' active' : '');
+      const preview = document.createElement('div');
+      preview.className = 'conv-preview';
+      preview.textContent = item.preview || '(空会话)';
+      const meta = document.createElement('div');
+      meta.className = 'conv-meta';
+      const time = document.createElement('span');
+      time.textContent = convDate(item.created_at);
+      meta.append(time);
+      if (item.has_summary) {
+        const badge = document.createElement('span');
+        badge.className = 'conv-badge';
+        badge.textContent = '已摘要';
+        meta.append(badge);
+      }
+      btn.append(preview, meta);
+      btn.addEventListener('click', () => switchConversation(item.id));
+      convListEl.append(btn);
+    }
+  }
+
+  async function loadConversations() {
+    try {
+      const res = await fetch('/api/conversations?user_id=' + encodeURIComponent(userId));
+      if (!res.ok) return;
+      const data = await res.json();
+      convItems = Array.isArray(data.items) ? data.items : [];
+      renderConversations();
+    } catch (e) {
+      console.warn('会话侧栏加载失败', e);   // 静默降级,不影响聊天
+    }
+  }
+
+  function renderHistoryMessage(m) {
+    if (m.role === 'user') {
+      addUser(m.content || '');
+      return;
+    }
+    const bubble = addAssistant('');
+    const textEl = bubble.querySelector('.text');
+    if (textEl) textEl.innerHTML = renderMarkdown(m.content || '');
+  }
+
+  async function switchConversation(id) {
+    if (busy) return false;
+    setBusy(true);
+    try {
+      const res = await fetch('/api/conversations/' + encodeURIComponent(id) + '/messages');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      saveConversationId(id);
+      messagesEl.innerHTML = '';
+      const items = Array.isArray(data.items) ? data.items : [];
+      for (const m of items) renderHistoryMessage(m);
+      if (!items.length) addAssistant(WELCOME);
+      renderConversations();
+      scrollToBottom();
+      return true;
+    } catch (e) {
+      console.warn('会话历史加载失败', e);   // 静默降级,保留当前聊天
+      return false;
+    } finally {
+      setBusy(false);
+      inputEl.focus();
+    }
   }
 
   function scrollToBottom() {
@@ -1055,6 +1203,7 @@
       addNotice('续跑失败:' + msg + '。请再试一次。');
       return false;
     } finally {
+      loadConversations();
       setBusy(false);
       inputEl.focus();
     }
@@ -1118,6 +1267,7 @@
         }
       }
     } finally {
+      loadConversations();
       setBusy(false);
       inputEl.focus();
     }
@@ -1150,10 +1300,19 @@
     saveConversationId(null);
     messagesEl.innerHTML = '';
     addAssistant(WELCOME);
+    renderConversations();
     inputEl.focus();
   });
 
-  addAssistant(WELCOME);
+  loadConversations().then(() => {
+    if (conversationId) {
+      switchConversation(conversationId).then((ok) => {
+        if (!ok) addAssistant(WELCOME);
+      });
+    } else {
+      addAssistant(WELCOME);
+    }
+  });
   inputEl.focus();
 </script>
 </body>

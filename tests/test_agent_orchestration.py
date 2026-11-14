@@ -94,7 +94,8 @@ async def test_knowledge_strong_evidence_reaches_agent_with_citations(monkeypatc
          "trace": {"forced_rag": True, "evidence_top": 0.9}}))
 
     async def fake_agent(state, config=None):
-        assert "已检索到的知识证据" in nodes._agent_messages(state)[0].content
+        assert any("已检索到的知识证据" in (m.content if isinstance(m.content, str) else "")
+                   for m in nodes._agent_messages(state))
         return {"messages": [AIMessage("7天无理由[1]")], "steps": 1, "tokens_used": 5}
 
     monkeypatch.setattr(nodes, "agent_llm", fake_agent)

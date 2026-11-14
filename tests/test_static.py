@@ -11,5 +11,6 @@ async def test_admin_pages_and_shared_nav():
             assert "/static/admin.js" in r.text
         r = await c.get("/")
         assert r.status_code == 200 and "/admin" in r.text
+        assert 'id="sidebar"' in r.text and "/api/conversations" in r.text
         for asset in ("/static/admin.js", "/static/acceptance.js", "/static/acceptance.css"):
             assert (await c.get(asset)).status_code == 200

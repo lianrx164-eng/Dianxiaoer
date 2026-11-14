@@ -235,18 +235,18 @@ def test_agent_messages_injects_order_and_policy_on_refund():
                        "product": "猫粮 5kg"},
         "evidence": "[1] 退货: 7天无理由",
         "messages": [HumanMessage("这单能退吗")]})
-    sys = msgs[0]
-    assert isinstance(sys, SystemMessage)
-    assert "7天无理由" in sys.content
-    assert "猫粮 5kg" in sys.content
-    assert "submit_refund" in sys.content
+    assert isinstance(msgs[0], SystemMessage)
+    ctx = msgs[-1]
+    assert "7天无理由" in ctx.content
+    assert "猫粮 5kg" in ctx.content
+    assert "submit_refund" in ctx.content
 
 
 def test_agent_messages_knowledge_path_still_injects_evidence():
     msgs = nodes._agent_messages({
         "route": "knowledge", "evidence": "[1] 运费: 满99包邮",
         "messages": [HumanMessage("运费多少")]})
-    assert "满99包邮" in msgs[0].content
+    assert "满99包邮" in msgs[-1].content
 
 
 def test_tools_for_hides_submit_refund_outside_refund_flow():

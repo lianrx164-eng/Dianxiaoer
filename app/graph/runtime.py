@@ -7,6 +7,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
 
 from app.config import settings
+from app.core import context_budget, memory, summarizer
 from app.db import repository
 from app.graph.build import build_graph
 
@@ -37,6 +38,10 @@ async def init_graph() -> None:
     _checkpointer = await _cm.__aenter__()
     await _checkpointer.setup()
     _graph = build_graph(checkpointer=_checkpointer)
+    budget = context_budget.self_check()
+    logger.info("上下文预算 window=%s fixed=%s peak=%s history=%s layer1=%s layer2=%s",
+                budget.window, budget.fixed, budget.react_peak,
+                budget.history, budget.layer1, budget.layer2)
     logger.info("ch05 图已编译,checkpointer=%s", settings.checkpointer_db_path)
 
 
@@ -72,10 +77,43 @@ def _human_id(message: str, prev_messages: list) -> str:
     return str(uuid.uuid4())
 
 
-def _graph_input(user_id: str, message: str, cid: int, prev_messages: list | None = None) -> dict:
+async def _load_context(cid: int) -> dict:
+    """读已落库对话,拼本轮精简历史;层 1 超预算就整轮移入层 2 并写回边界。"""
+    conv = await repository.get_conversation(cid)
+    if conv is None:
+        raise ConversationNotFound(cid)
+    rows = await repository.list_dialog_messages(cid)
+    history = [memory.row_to_message(r) for r in rows]
+    summary = conv.summary or ""
+    upto = conv.summary_upto_msg_id or 0
+    layer1_from = conv.layer1_from_msg_id or 0
+    if layer1_from < upto:                 # 边界不变量:层 1 起点不越过梗概覆盖
+        logger.info("layer1 边界夹紧 %s->%s conv=%s", layer1_from, upto, cid)
+        layer1_from = upto
+        await repository.update_layer1_from(cid, layer1_from)
+    budget = context_budget.compute_budget()
+    layer1_msgs = [m for m in history if (memory.db_id(m) or 0) > layer1_from]
+    layer1_tokens = context_budget.estimate_messages_tokens(layer1_msgs)
+    new_from = memory.degrade_layer1(history, layer1_from, budget.layer1)
+    if new_from != layer1_from:
+        await repository.update_layer1_from(cid, new_from)
+        logger.info("layer1 降级 %s->%s conv=%s layer1_tokens=%s layer1_budget=%s",
+                    layer1_from, new_from, cid, layer1_tokens, budget.layer1)
+        layer1_from = new_from
+    kept = [m for m in history if (memory.db_id(m) or 0) > upto]
+    return {"history_messages": kept, "summary": summary,
+            "summary_upto_msg_id": upto, "layer1_from_msg_id": layer1_from}
+
+
+def _graph_input(user_id: str, message: str, cid: int,
+                 prev_messages: list | None, ctx: dict) -> dict:
     return {
         "messages": [HumanMessage(message, id=_human_id(message, prev_messages or []))],
         "user_id": user_id, "conversation_id": cid,
+        "history_messages": ctx["history_messages"],
+        "summary": ctx["summary"],
+        "summary_upto_msg_id": ctx["summary_upto_msg_id"],
+        "layer1_from_msg_id": ctx["layer1_from_msg_id"],
         # 每轮显式重置:这些是普通字段,不重置会残留上一轮的键/答案/按钮
         "intent": "", "route": "", "evidence": "", "citations": [],
         "evidence_strong": False, "answer": "", "steps": 0, "tokens_used": 0,
@@ -141,8 +179,10 @@ async def run_turn(user_id, message, conversation_id) -> dict:
                 "state": {**(prev.values or {}), "answer": "", "turn_messages": []},
                 "interrupt": pending.get("orders")}
     prev_messages = (prev.values or {}).get("messages", []) if prev else []
+    ctx = await _load_context(cid)
     final = await graph.ainvoke(
-        _graph_input(user_id, message, cid, prev_messages), config)
+        _graph_input(user_id, message, cid, prev_messages, ctx), config)
+    await summarizer.maybe_schedule_summary(cid)
     return _turn_result(cid, final, prev_messages)
 
 
@@ -194,9 +234,11 @@ async def stream_turn(user_id, message, conversation_id) -> AsyncIterator[dict]:
         yield _interrupt_event(cid, pending)
         return
     prev_messages = (prev.values or {}).get("messages", []) if prev else []
+    ctx = await _load_context(cid)
     async for ev in _stream_events(
-            cid, _graph_input(user_id, message, cid, prev_messages)):
+            cid, _graph_input(user_id, message, cid, prev_messages, ctx)):
         yield ev
+    await summarizer.maybe_schedule_summary(cid)
 
 
 async def stream_resume(conversation_id: int, resume_value) -> AsyncIterator[dict]:
@@ -205,6 +247,7 @@ async def stream_resume(conversation_id: int, resume_value) -> AsyncIterator[dic
         raise ConversationNotFound(conversation_id)
     async for ev in _stream_events(conversation_id, Command(resume=resume_value)):
         yield ev
+    await summarizer.maybe_schedule_summary(conversation_id)
 
 
 async def resume_turn(conversation_id: int, resume_value) -> dict:
@@ -216,4 +259,5 @@ async def resume_turn(conversation_id: int, resume_value) -> dict:
     prev = await graph.aget_state(config)
     prev_messages = (prev.values or {}).get("messages", []) if prev else []
     final = await graph.ainvoke(Command(resume=resume_value), config)
+    await summarizer.maybe_schedule_summary(conversation_id)
     return _turn_result(conversation_id, final, prev_messages)

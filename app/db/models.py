@@ -14,6 +14,10 @@ class Conversation(Base):
     status: Mapped[str] = mapped_column(
         Enum("进行中", "已转人工", "已结束"), server_default="进行中"
     )
+    # ch07:最近几段梗概的投影(注入用);真源是 conversation_summaries
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summary_upto_msg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    layer1_from_msg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()
@@ -31,6 +35,20 @@ class Message(Base):
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
     tool_calls: Mapped[list | None] = mapped_column(JSON, nullable=True)
     tool_call_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class ConversationSummary(Base):
+    """ch07 分段摘要:一段一行只追加;压完的段不回头重写。"""
+
+    __tablename__ = "conversation_summaries"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    conversation_id: Mapped[int] = mapped_column(BigInteger)
+    seq: Mapped[int] = mapped_column(Integer)
+    from_msg_id: Mapped[int] = mapped_column(BigInteger)
+    upto_msg_id: Mapped[int] = mapped_column(BigInteger)
+    content: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 

@@ -11,20 +11,18 @@ def test_agent_messages_injects_evidence_on_knowledge():
         {"route": "knowledge", "evidence": "[1] 退货: 7天",
          "messages": [HumanMessage("能退吗")]})
     assert isinstance(msgs[0], SystemMessage)
-    assert "[1] 退货: 7天" in msgs[0].content
-    assert "query_faq" in msgs[0].content  # 指示别再检索
+    assert "[1] 退货: 7天" in msgs[-1].content
+    assert "query_faq" in msgs[-1].content  # 指示别再检索
 
 
 def test_agent_messages_no_evidence_on_business():
     msgs = nodes._agent_messages({"route": "business", "messages": [HumanMessage("订单1001")]})
     assert isinstance(msgs[0], SystemMessage)
-    assert "已检索到的知识证据" not in msgs[0].content
+    assert "已检索到的知识证据" not in "".join(
+        m.content for m in msgs if isinstance(m.content, str))
 
 
-def test_agent_messages_trims_long_history(monkeypatch):
-    from app.config import settings
-
-    monkeypatch.setattr(settings, "token_budget", 50)
+def test_agent_messages_uses_only_current_turn_without_history():
     old = [HumanMessage("旧问题"), AIMessage("长回答" * 5000)]
     msgs = nodes._agent_messages(
         {"route": "business", "messages": [*old, HumanMessage("新问题")]})

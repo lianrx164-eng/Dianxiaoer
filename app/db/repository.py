@@ -2,9 +2,13 @@ from datetime import datetime
 
 from sqlalchemy import func, select, text
 
+from app.config import settings
+from app.core.context_budget import estimate_text_tokens, keep_newest_fitting
+
 import app.db.base as db          # 用模块属性引用,便于测试 monkeypatch async_session
 from app.db.models import (
     Conversation,
+    ConversationSummary,
     FaithCase,
     Faq,
     KnowledgeChunk,
@@ -393,3 +397,90 @@ async def list_disposed_faith_cases() -> list[FaithCase]:
             .order_by(FaithCase.id)
         )).scalars()
         return list(rows)
+
+
+# ---------------- ch07 会话上下文 ----------------
+
+
+async def list_dialog_messages(conversation_id: int) -> list[Message]:
+    """user/assistant 消息按 id 升序(摘要与历史回载共用;tool 行不落库,过滤一道保险)。"""
+    async with db.async_session() as s:
+        result = await s.execute(
+            select(Message)
+            .where(Message.conversation_id == conversation_id,
+                   Message.role.in_(("user", "assistant")))
+            .order_by(Message.id)
+        )
+        return list(result.scalars())
+
+
+async def update_layer1_from(conversation_id: int, msg_id: int) -> None:
+    """层 1 降级:只挪边界 id,不搬数据。"""
+    async with db.async_session() as s:
+        conv = await s.get(Conversation, conversation_id)
+        if conv is not None:
+            conv.layer1_from_msg_id = msg_id
+            await s.commit()
+
+
+async def list_summaries(conversation_id: int) -> list[ConversationSummary]:
+    async with db.async_session() as s:
+        result = await s.execute(
+            select(ConversationSummary)
+            .where(ConversationSummary.conversation_id == conversation_id)
+            .order_by(ConversationSummary.seq)
+        )
+        return list(result.scalars())
+
+
+async def append_summary(
+    conversation_id: int, from_msg_id: int, upto_msg_id: int, content: str,
+) -> int:
+    """插一段 + 重建投影 + 追 summary_upto,单事务;旧段永不改。返回新段 seq。"""
+    budget = settings.summary_budget_tokens
+    async with db.async_session() as s:
+        conv = await s.get(Conversation, conversation_id)
+        if conv is None:
+            return 0
+        if (conv.summary_upto_msg_id or 0) >= upto_msg_id:
+            return 0                      # 另一进程已推进更远,不重复段/不回退边界
+        max_seq = (await s.execute(
+            select(func.max(ConversationSummary.seq))
+            .where(ConversationSummary.conversation_id == conversation_id)
+        )).scalar_one()
+        seq = int(max_seq or 0) + 1
+        s.add(ConversationSummary(
+            conversation_id=conversation_id, seq=seq,
+            from_msg_id=from_msg_id, upto_msg_id=upto_msg_id, content=content))
+        await s.flush()
+        rows = list((await s.execute(
+            select(ConversationSummary)
+            .where(ConversationSummary.conversation_id == conversation_id)
+            .order_by(ConversationSummary.seq))).scalars())
+        kept = keep_newest_fitting(
+            rows, budget, lambda row: estimate_text_tokens(row.content))
+        conv.summary = "\n".join(row.content for row in kept)
+        conv.summary_upto_msg_id = upto_msg_id
+        await s.commit()
+        return seq
+
+
+async def list_conversations(user_id: str, limit: int = 50) -> list[dict]:
+    """某用户的会话列表:id desc 新在前,带首问预览与是否已摘要。"""
+    async with db.async_session() as s:
+        convs = list((await s.execute(
+            select(Conversation).where(Conversation.user_id == user_id)
+            .order_by(Conversation.id.desc()).limit(limit))).scalars())
+        out = []
+        for conv in convs:
+            preview = (await s.execute(
+                select(Message.content)
+                .where(Message.conversation_id == conv.id, Message.role == "user")
+                .order_by(Message.id).limit(1))).scalar_one_or_none()
+            out.append({
+                "id": conv.id, "status": conv.status,
+                "preview": (preview or "").strip()[:40],
+                "has_summary": bool(conv.summary_upto_msg_id),
+                "created_at": conv.created_at.isoformat() if conv.created_at else None,
+            })
+        return out

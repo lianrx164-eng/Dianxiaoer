@@ -7,11 +7,11 @@ from langgraph.types import interrupt
 
 from app.config import settings
 from app.core import coref as coref_mod
+from app.core import context_budget, memory
 from app.core import evidence
 from app.core import intent as intent_mod
 from app.core import query_understanding, retrieval
 from app.core.llm import get_chat_model
-from app.core.memory import trim_history
 from app.core.prompts import (
     AGENT_SYSTEM,
     CHITCHAT_REPLY_TEXT,
@@ -41,10 +41,13 @@ def _user_text(state) -> str:
 
 
 def _history_text(state, max_messages: int = 6) -> str:
-    """把本轮之前的 human/ai 消息压成紧凑文本,供 coref / 意图识别读上下文。
-    不含本轮最后一条 human(那是待处理的话本身);工具 JSON 也不进(它不是客服话术)。"""
-    msgs = state.get("messages", [])
-    prior = msgs[:-1] if msgs else []
+    """摘要行 + 最近几轮历史,供 coref / 意图识别读上下文。
+    优先用本轮从 DB 构造的 history_messages;旧测试/直接调用没给时回落
+    到 state.messages[:-1](去掉当前这句)。工具 JSON 不进(它不是客服话术)。"""
+    if "history_messages" in state:
+        prior = state.get("history_messages") or []
+    else:
+        prior = state.get("messages", [])[:-1]
     lines = []
     for m in prior[-max_messages:]:
         if isinstance(m, HumanMessage):
@@ -56,7 +59,9 @@ def _history_text(state, max_messages: int = 6) -> str:
         text = m.content if isinstance(m.content, str) else ""
         if text:
             lines.append(f"{role}:{text}")
-    return "\n".join(lines)
+    body = "\n".join(lines)
+    head = memory.summary_line(state.get("summary"))
+    return f"{head}\n{body}".strip() if head else body
 
 
 def _in_refund_flow(state) -> bool:
@@ -113,7 +118,9 @@ async def coref(state) -> dict:
     """指代消解 + Query 改写(合一):吃最近几轮历史把半截话补成完整问句;已完整则透传。
     写 resolved_query,供 classify_intent / forced_rag / retrieve_policy 共用。"""
     query = _user_text(state)
-    resolved = await coref_mod.resolve(query, _history_text(state))
+    history = _history_text(state)
+    logger.info("history_ctx conv=%s\n%s", state.get("conversation_id"), history)
+    resolved = await coref_mod.resolve(query, history)
     mode = "rewrite" if resolved != query else "passthrough"
     return {"resolved_query": resolved,
             "trace": trace_of(state, coref=mode, resolved_query=resolved)}
@@ -218,17 +225,68 @@ _KNOWLEDGE_EVIDENCE_HINT = (
     "证据已给,不要再调用 query_faq;仍可按需调用订单/物流等工具)\n"
 )
 
+TURN_CTX_ID = "turn-ctx"
+
 
 def _agent_messages(state) -> list:
-    """system(有证据就拼,知识路/退款路通用;退款路再拼 order_data + 判定指令)+ 跨轮历史。"""
-    sys = AGENT_SYSTEM
+    """固定顺序(ch07):system 人设/红线(恒定)→ 层2 截短 → 层1 原文 → 当前用户 →
+    梗概+证据+退款订单数据(挂当前用户之后)→ 本轮 ReAct 后续。
+
+    整条列表只有一条 SystemMessage,内容恒为 AGENT_SYSTEM;上游 chat template 会把
+    所有 system 上提合并,可变内容一旦进 system,工具定义被挤后、前缀缓存整段作废。"""
+    budget = context_budget.compute_budget()
+    layer2, layer1 = memory.build_layers(
+        state.get("history_messages", []),
+        state.get("summary_upto_msg_id", 0) or 0,
+        state.get("layer1_from_msg_id", 0) or 0,
+        budget.layer1, budget.layer2,
+        settings.layer2_assistant_chars, settings.layer2_tool_keep_chars)
+    current = _current_turn_messages(state)
+    ctx = _turn_context(state)
+    msgs = [SystemMessage(AGENT_SYSTEM), *layer2, *layer1]
+    if current:
+        msgs.append(current[0])                       # 当前用户
+        if ctx:
+            msgs.append(HumanMessage(ctx, id=TURN_CTX_ID))
+        msgs.extend(current[1:])                      # 本轮 ReAct 后续
+    elif ctx:
+        msgs.append(HumanMessage(ctx, id=TURN_CTX_ID))
+    return msgs
+
+
+def _current_turn_messages(state) -> list:
+    """本轮新增消息:从最后一条 HumanMessage 起到尾(当前用户 + ReAct 轨迹)。"""
+    msgs = state.get("messages", [])
+    for i in range(len(msgs) - 1, -1, -1):
+        if isinstance(msgs[i], HumanMessage):
+            return msgs[i:]
+    return msgs[-1:] if msgs else []
+
+
+def _turn_context(state) -> str:
+    """本轮材料:梗概 + 知识证据 + 退款订单数据/判定指令;没有则空串。"""
+    parts = []
+    if state.get("summary"):
+        parts.append("\n\n## 早前对话摘要(更早轮次已压缩,其中事实可信)\n"
+                     + state["summary"])
     if state.get("evidence"):
-        sys = sys + _KNOWLEDGE_EVIDENCE_HINT + state["evidence"]
+        parts.append(_KNOWLEDGE_EVIDENCE_HINT + state["evidence"])
     if _in_refund_flow(state):
-        sys = (sys + REFUND_JUDGE_HINT
-               + json.dumps(state.get("order_data") or {}, ensure_ascii=False))
-    history = trim_history(state.get("messages", []), max_tokens=settings.token_budget)
-    return [SystemMessage(sys), *history]
+        parts.append(REFUND_JUDGE_HINT
+                     + json.dumps(state.get("order_data") or {}, ensure_ascii=False))
+    return "".join(parts)
+
+
+def _log_model_context(state, msgs) -> None:
+    """调模型前把实际上下文打进 log/app.log(验收可观测)。"""
+    window = msgs[1:]                                 # 去掉静态 system
+    desc = [f"[{m.type}] '{(m.content if isinstance(m.content, str) else '')[:40]}'"
+            for m in window]
+    logger.info(
+        "model_ctx conv=%s step=%s summary=%r window_msgs=%d tokens=%d window=%s",
+        state.get("conversation_id"), state.get("steps", 0),
+        state.get("summary") or "", len(window),
+        context_budget.estimate_messages_tokens(msgs), " | ".join(desc))
 
 
 def _tools_for(state) -> list:
@@ -243,7 +301,9 @@ def _tools_for(state) -> list:
 async def agent_llm(state, config=None) -> dict:
     """ReAct 推理步:调模型(带工具),累加 steps 与 token 消耗。"""
     model = get_chat_model(streaming=True).bind_tools(_tools_for(state))
-    ai: AIMessage = await model.ainvoke(_agent_messages(state), config)
+    msgs = _agent_messages(state)
+    _log_model_context(state, msgs)
+    ai: AIMessage = await model.ainvoke(msgs, config)
     usage = ai.usage_metadata or {}
     steps = state.get("steps", 0) + 1
     return {"messages": [ai], "steps": steps,

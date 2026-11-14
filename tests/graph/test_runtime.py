@@ -1,7 +1,15 @@
+from types import SimpleNamespace
+
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 
 from app.graph import runtime
+from runtime_fakes import patch_runtime_repo
+
+
+@pytest.fixture(autouse=True)
+def _quiet(monkeypatch):
+    patch_runtime_repo(monkeypatch, runtime)
 
 
 @pytest.mark.asyncio
@@ -86,7 +94,7 @@ async def test_run_turn_returns_only_this_turns_messages(monkeypatch):
     old = [AIMessage("old"), AIMessage("old2")]
 
     async def fake_get(cid):
-        return object()
+        return SimpleNamespace(summary="", summary_upto_msg_id=0, layer1_from_msg_id=0)
 
     async def fake_append(*a, **k):
         return 1
@@ -103,6 +111,44 @@ async def test_run_turn_returns_only_this_turns_messages(monkeypatch):
     monkeypatch.setattr(runtime, "get_graph", lambda: FakeGraph())
     out = await runtime.run_turn("u1", "hi", 5)
     assert [m.content for m in out["state"]["turn_messages"]] == ["hi", "new"]
+
+
+async def test_run_turn_passes_context_fields_and_schedules(monkeypatch):
+    conv = SimpleNamespace(summary="早前摘要", summary_upto_msg_id=0, layer1_from_msg_id=0)
+
+    async def fake_create(uid):
+        return 7
+
+    async def fake_get(cid):
+        return conv
+
+    async def fake_rows(cid):
+        return [SimpleNamespace(id=1, role="user", content="q1"),
+                SimpleNamespace(id=2, role="assistant", content="a1")]
+
+    scheduled = []
+
+    async def fake_schedule(cid):
+        scheduled.append(cid)
+
+    class FakeGraph:
+        async def aget_state(self, config):
+            return type("S", (), {"values": {}})()
+
+        async def ainvoke(self, inp, config, durability=None):
+            assert inp["summary"] == "早前摘要"
+            assert [m.content for m in inp["history_messages"]] == ["q1", "a1"]
+            assert inp["summary_upto_msg_id"] == 0 and inp["layer1_from_msg_id"] == 0
+            return {"answer": "hi", "messages": [], "conversation_id": 7}
+
+    monkeypatch.setattr(runtime.repository, "create_conversation", fake_create)
+    monkeypatch.setattr(runtime.repository, "get_conversation", fake_get)
+    monkeypatch.setattr(runtime.repository, "list_dialog_messages", fake_rows)
+    monkeypatch.setattr(runtime.summarizer, "maybe_schedule_summary", fake_schedule)
+    monkeypatch.setattr(runtime, "get_graph", lambda: FakeGraph())
+    out = await runtime.run_turn("u1", "hi", None)
+    assert out["conversation_id"] == 7
+    assert scheduled == [7]
 
 
 @pytest.mark.asyncio
@@ -236,3 +282,54 @@ async def test_stream_resume_uses_command(monkeypatch):
     events = [e async for e in runtime.stream_resume(5, "1001")]
     assert seen["is_command"] and seen["resume"] == "1001"
     assert events[-1] == {"type": "done", "conversation_id": 5}
+
+
+async def test_load_context_clamps_layer1_from_to_summary_upto(monkeypatch):
+    conv = SimpleNamespace(summary="s", summary_upto_msg_id=5, layer1_from_msg_id=2)
+    updated = []
+
+    async def fake_get(cid):
+        return conv
+
+    async def fake_rows(cid):
+        return []
+
+    async def fake_update(cid, mid):
+        updated.append(mid)
+
+    monkeypatch.setattr(runtime.repository, "get_conversation", fake_get)
+    monkeypatch.setattr(runtime.repository, "list_dialog_messages", fake_rows)
+    monkeypatch.setattr(runtime.repository, "update_layer1_from", fake_update)
+    ctx = await runtime._load_context(7)
+    assert ctx["layer1_from_msg_id"] == 5 and updated == [5]
+
+
+async def test_load_context_logs_degrade_with_layer1_tokens(monkeypatch, caplog):
+    conv = SimpleNamespace(summary="", summary_upto_msg_id=0, layer1_from_msg_id=0)
+    rows = [
+        SimpleNamespace(id=1, role="user", content="q1" * 50),
+        SimpleNamespace(id=2, role="assistant", content="a1" * 50),
+        SimpleNamespace(id=3, role="user", content="q2" * 50),
+        SimpleNamespace(id=4, role="assistant", content="a2" * 50),
+    ]
+    updated = []
+
+    async def fake_get(cid):
+        return conv
+
+    async def fake_rows(cid):
+        return rows
+
+    async def fake_update(cid, mid):
+        updated.append(mid)
+
+    monkeypatch.setattr(runtime.repository, "get_conversation", fake_get)
+    monkeypatch.setattr(runtime.repository, "list_dialog_messages", fake_rows)
+    monkeypatch.setattr(runtime.repository, "update_layer1_from", fake_update)
+    monkeypatch.setattr(runtime.context_budget, "compute_budget",
+                        lambda: runtime.context_budget.ContextBudget(
+                            64000, 0, 0, 30000, 1, 1))
+    with caplog.at_level("INFO", logger="app.graph.runtime"):
+        ctx = await runtime._load_context(7)
+    assert ctx["layer1_from_msg_id"] == 2 and updated == [2]
+    assert "layer1 降级" in caplog.text and "layer1_tokens=" in caplog.text

@@ -1,0 +1,72 @@
+import logging
+
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+
+from app.config import Settings
+from app.core import context_budget as cb
+
+
+def _settings(**kw):
+    base = dict(chat_model="m", chat_base_url="u", chat_api_key="k",
+                embed_api_key="k", _env_file=None)
+    base.update(kw)
+    return Settings(**base)
+
+
+def test_estimate_text_tokens_uses_chars_per_token():
+    s = _settings()
+    assert cb.estimate_text_tokens("", s) == 0
+    assert cb.estimate_text_tokens("a" * 777, s) == 389
+    assert cb.estimate_text_tokens("a" * 2161, s) == 1081
+
+
+def test_demo_budget_matches_acceptance_numbers():
+    b = cb.compute_budget(_settings(
+        model_context_window=18000, max_output_tokens=2000,
+        max_user_input_tokens=2000, max_agent_steps=3,
+        tool_result_max_tokens=1200, rerank_top_k=5))
+    assert (b.window, b.fixed, b.react_peak, b.history, b.layer1, b.layer2) == (
+        18000, 8750, 3600, 5650, 3954, 1695)
+
+
+def test_only_window_set_yields_50_and_self_check_warns(caplog):
+    s = _settings(model_context_window=18000)      # 步数/rerank 保持默认 6/10
+    b = cb.compute_budget(s)
+    assert (b.fixed, b.react_peak, b.history, b.layer1, b.layer2) == (
+        10750, 7200, 50, 34, 15)
+    with caplog.at_level(logging.ERROR, logger="app.core.context_budget"):
+        cb.self_check(s)
+    assert "上下文预算不足" in caplog.text
+
+
+def test_default_budget():
+    b = cb.compute_budget(_settings())
+    assert (b.window, b.fixed, b.react_peak, b.history, b.layer1, b.layer2) == (
+        64000, 10750, 7200, 30000, 20999, 9000)
+
+
+def test_budget_constants_match_prompt_and_tools():
+    """提示词或工具 schema 变了,这条先红;重测后同步 system/tools 常量。"""
+    import json
+
+    from langchain_core.utils.function_calling import convert_to_openai_tool
+
+    from app.core.prompts import AGENT_SYSTEM
+    from app.tools.registry import get_all_tools
+
+    s = _settings()
+    tools_json = json.dumps([convert_to_openai_tool(t) for t in get_all_tools()],
+                            ensure_ascii=False)
+    assert cb.estimate_text_tokens(AGENT_SYSTEM, s) == s.system_prompt_tokens
+    assert cb.estimate_text_tokens(tools_json, s) == s.tool_schema_tokens
+
+
+def test_estimate_messages_tokens_counts_tool_calls():
+    s = _settings()
+    msgs = [
+        HumanMessage("你好" * 10),
+        AIMessage("", tool_calls=[{"name": "query_order",
+                                   "args": {"order_id": "1001"}, "id": "c1"}]),
+        ToolMessage("x" * 100, tool_call_id="c1", name="query_order"),
+    ]
+    assert cb.estimate_messages_tokens(msgs, s) > cb.estimate_text_tokens("你好" * 10, s)

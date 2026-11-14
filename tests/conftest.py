@@ -20,10 +20,11 @@ _DDL_FILES = [
     pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch02-ddl.sql",
     pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch03-ddl.sql",
     pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch04-ddl.sql",
+    pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch07-ddl.sql",
 ]
 # 删除顺序:先子表后父表;knowledge_chunks 自引用 FK 靠 FOREIGN_KEY_CHECKS=0 兜
 _TABLES = [
-    "faith_cases", "low_confidence_questions",
+    "conversation_summaries", "faith_cases", "low_confidence_questions",
     "messages", "tickets", "conversations", "faq",
     "qa_extraction_staging", "knowledge_chunks",
 ]
@@ -34,7 +35,7 @@ def _ddl_statements() -> list[str]:
     for ddl in _DDL_FILES:
         stmts += [
             s for s in split_statements(ddl.read_text(encoding="utf-8"))
-            if "CREATE TABLE" in s.upper()
+            if "CREATE TABLE" in s.upper() or "ALTER TABLE" in s.upper()
         ]
     return stmts
 

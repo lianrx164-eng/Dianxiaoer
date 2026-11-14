@@ -1,4 +1,4 @@
-.PHONY: dev test eval seed eval-agent kb-preview kb-build kb-vectorize kb-mine kb-reset eval-retrieval seed-conv eval-mining smoke-rag eval-rag eval-check judge-check eval-rewrite smoke-graph eval-intent eval-ch05 smoke-interrupt eval-coref eval-expand eval-ch06
+.PHONY: dev test eval seed eval-agent kb-preview kb-build kb-vectorize kb-mine kb-reset eval-retrieval seed-conv eval-mining smoke-rag eval-rag eval-check judge-check eval-rewrite smoke-graph eval-intent eval-ch05 smoke-interrupt eval-coref eval-expand eval-ch06 eval-ch07 smoke-ch07 smoke-ch07-demo
 
 dev:
 	./scripts/dev.sh
@@ -86,3 +86,15 @@ eval-expand:
 # ch06 四验收端到端(需服务在跑 + 已应用 sql/ch06-ticket-type.sql)
 eval-ch06:
 	PYTHONUTF8=1 uv run python -m scripts.eval_ch06
+
+# ch07 分段摘要 prompt 标注评估(需上游可用)
+eval-ch07:
+	PYTHONUTF8=1 uv run python -m scripts.eval_ch07
+
+# ch07 端到端冒烟:默认 22 轮不压(独立 checkpointer,避免与预览服务抢 SQLite 锁)
+smoke-ch07:
+	CHECKPOINTER_DB_PATH=data/ch05_checkpoints_smoke.sqlite PYTHONUTF8=1 uv run python -m scripts.smoke_ch07 default
+
+# ch07 演示配置 30 轮级联(层1降级 → 摘要落库;25 轮层2约 1515<1695,30 轮过阈值)
+smoke-ch07-demo:
+	MODEL_CONTEXT_WINDOW=18000 MAX_OUTPUT_TOKENS=2000 MAX_USER_INPUT_TOKENS=2000 MAX_AGENT_STEPS=3 TOOL_RESULT_MAX_TOKENS=1200 RERANK_TOP_K=5 CHECKPOINTER_DB_PATH=data/ch05_checkpoints_smoke.sqlite PYTHONUTF8=1 uv run python -m scripts.smoke_ch07 demo

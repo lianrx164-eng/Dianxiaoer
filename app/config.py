@@ -8,7 +8,6 @@ class Settings(BaseSettings):
     chat_model: str
     chat_base_url: str
     chat_api_key: str
-    token_budget: int = 2000
     # 提取任务的上游思考开关。默认 None = 不发送该参数,保证换上游只改 .env;
     # DeepSeek 需设 disabled(思考模式不支持强制 tool_choice)
     extract_thinking: str | None = None
@@ -40,6 +39,23 @@ class Settings(BaseSettings):
     intent_small_model: str = ""        # 降级路小模型(种子,未接运行时)
     intent_mode: str = "accuracy"       # accuracy=只用大模型;cost=小模型判→低置信升级(未实现)
     intent_conf_threshold: float = 0.6  # cost 模式升级阈值(种子)
+
+    # ch07 会话上下文预算(全部可从 env 覆盖;演示见 spec §7.2)
+    model_context_window: int = 64000
+    max_output_tokens: int = 2000
+    max_user_input_tokens: int = 2000
+    tool_result_max_tokens: int = 1200
+    chars_per_token: float = 2.0
+    system_prompt_tokens: int = 389       # AGENT_SYSTEM 777 字 @ 2.0
+    tool_schema_tokens: int = 1081        # 6 个工具 schema 2161 字 @ 2.0
+    system_overhead_tokens: int = 30
+    evidence_chunk_tokens: int = 400
+    summary_budget_tokens: int = 750
+    safety_margin_tokens: int = 500
+    desired_history_turns: int = 30
+    turn_token_estimate: int = 1000
+    layer2_assistant_chars: int = 40
+    layer2_tool_keep_chars: int = 120
 
 
 settings = Settings()

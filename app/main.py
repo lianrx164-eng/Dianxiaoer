@@ -10,6 +10,7 @@ from app.api.actions import router as actions_router
 from app.api.admin import router as admin_router
 from app.api.agent import router as agent_router
 from app.api.chat import router as chat_router
+from app.api.conversations import router as conversations_router
 from app.api.extract import router as extract_router
 from app.api.jobs import router as jobs_router
 from app.api.kb import router as kb_router
@@ -27,6 +28,12 @@ if not _app_log.handlers:
     _h = logging.StreamHandler()
     _h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
     _app_log.addHandler(_h)
+# ch07 验收可观测:model_ctx / history_ctx / summary 落 log/app.log(log/ 已 gitignore)
+if not any(isinstance(h, logging.FileHandler) for h in _app_log.handlers):
+    Path("log").mkdir(exist_ok=True)
+    _fh = logging.FileHandler(Path("log") / "app.log", encoding="utf-8")
+    _fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+    _app_log.addHandler(_fh)
 
 
 @asynccontextmanager
@@ -45,6 +52,7 @@ app.include_router(jobs_router)
 app.include_router(admin_router)
 app.include_router(rageval_router)
 app.include_router(actions_router)
+app.include_router(conversations_router)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 

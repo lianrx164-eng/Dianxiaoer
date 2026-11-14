@@ -1,4 +1,4 @@
-from app.db.models import Conversation, Message
+from app.db.models import Conversation, ConversationSummary, Message
 
 
 async def test_conversation_defaults_and_autoincrement(db_session_factory, db_clean):
@@ -28,3 +28,15 @@ async def test_message_json_tool_calls_roundtrip(db_session_factory, db_clean):
         got = await s.get(Message, msg.id)
         assert got.tool_calls[0]["name"] == "query_order"   # JSON 往返
         assert got.role == "assistant"
+
+
+async def test_conversation_summary_row_roundtrip(db_session_factory, db_clean):
+    async with db_session_factory() as s:
+        row = ConversationSummary(
+            conversation_id=1, seq=1, from_msg_id=1, upto_msg_id=2,
+            content="用户问过订单1001")
+        s.add(row)
+        await s.commit()
+        await s.refresh(row)
+        assert row.id is not None and row.created_at is not None
+        assert row.content == "用户问过订单1001"
