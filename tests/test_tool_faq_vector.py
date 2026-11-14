@@ -37,4 +37,4 @@ async def test_query_faq_empty_returns_refusal(monkeypatch):
     monkeypatch.setattr("app.core.retrieval.search_knowledge", fake_search)
     out = await query_faq.ainvoke({"keyword": "无关问题"})
     assert out["sufficient"] is False
-    assert "检索证据不足" in out["reason"]
+    assert "证据置信度不足" in out["reason"]

@@ -69,7 +69,8 @@ async def test_forced_rag_uses_resolved_query(monkeypatch):
     async def fake_gather(q, category=None):
         seen["q"] = q
         return {"sufficient": False, "source": "retrieval_low_conf",
-                "reason": "", "top": 0.0}
+                "reason": "", "top": 0.0, "confidence": 0.0,
+                "signals": {}, "snapshot": []}
 
     monkeypatch.setattr(nodes.evidence, "gather_evidence", fake_gather)
     await nodes.forced_rag({"messages": [HumanMessage("它呢")],

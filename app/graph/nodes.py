@@ -88,15 +88,20 @@ async def complaint_reply(state) -> dict:
 
 
 async def fallback_reply(state) -> dict:
-    """置信度兜底:证据弱回兜底话术,并把问题落低置信池留给数据飞轮。"""
+    """置信度兜底:证据弱回兜底话术,并把问题落低置信池留给数据飞轮。
+    ch09:source 用 fallback_source(缺失回落 trace.gate),随条存召回快照给审核页。"""
     trace = state.get("trace") or {}
-    source = trace.get("gate") or "retrieval_low_conf"
+    source = state.get("fallback_source") or trace.get("gate") or "retrieval_low_conf"
+    signals = trace.get("confidence_signals") or {}
+    reason = (f"evidence_confidence={state.get('evidence_confidence', 0.0):.3f} "
+              f"signals={json.dumps(signals, ensure_ascii=False)}")
     if source == "self_check":
-        reason = trace.get("self_check") or "证据自评不足"
-    else:
-        reason = f"检索证据不足(top={trace.get('evidence_top', 0):.3f})"
+        reason += f" self_check={trace.get('self_check', '')}"
+    snapshot = state.get("retrieved_snapshot") or None   # 没走检索存 NULL,不存 []
     await repository.insert_low_confidence(
-        state.get("conversation_id"), _user_text(state), source, reason)
+        state.get("conversation_id"), _user_text(state), source, reason,
+        retrieved_chunks=snapshot,
+    )
     return {"answer": FALLBACK_REPLY,
             "trace": trace_of(state, handler="fallback")}
 
@@ -210,18 +215,23 @@ async def retrieve_policy(state) -> dict:
 
 
 async def forced_rag(state) -> dict:
-    """知识类强制检索:复用统一证据管线(检索分闸 + 自评闸),结果落进 State。
-    用 resolved_query 检索(指代已补全,避免拿半截话去查)。"""
+    """知识类强制检索:复用统一证据管线(置信度闸 + 自评闸),结果落进 State。
+    用 resolved_query 检索(指代已补全,避免拿半截话去查)。
+    ch09:把置信度/source/召回快照写进 state——闸不过随兜底落池,闸过了留给 👎 回捞。"""
     r = await evidence.gather_evidence(
         state.get("resolved_query") or _user_text(state))
+    base = {"evidence_confidence": r["confidence"],
+            "retrieved_snapshot": r["snapshot"]}
     if not r["sufficient"]:
         extra = {"self_check": r["reason"]} if r["source"] == "self_check" else {}
-        return {"evidence_strong": False,
+        return {**base, "evidence_strong": False, "fallback_source": r["source"],
                 "trace": trace_of(state, forced_rag=True, evidence_top=r["top"],
+                                  confidence_signals=r["signals"],
                                   gate=r["source"], **extra)}
-    return {"evidence_strong": True, "evidence": r["evidence"],
+    return {**base, "evidence_strong": True, "evidence": r["evidence"],
             "citations": r["citations"],
-            "trace": trace_of(state, forced_rag=True, evidence_top=r["top"])}
+            "trace": trace_of(state, forced_rag=True, evidence_top=r["top"],
+                              confidence_signals=r["signals"])}
 
 
 async def confidence_check(state) -> dict:

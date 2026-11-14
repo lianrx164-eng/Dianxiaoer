@@ -120,6 +120,7 @@ def _graph_input(user_id: str, message: str, cid: int,
         # 由 classify_intent 消费后清零。
         "intent": "", "route": "", "evidence": "", "citations": [],
         "evidence_strong": False, "answer": "", "steps": 0, "tokens_used": 0,
+        "evidence_confidence": 0.0, "fallback_source": "", "retrieved_snapshot": [],
         "suggested_actions": [], "trace": {},
         "resolved_query": "", "intent_confidence": 0.0,
         "order_id": "", "order_data": {},

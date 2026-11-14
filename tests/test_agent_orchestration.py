@@ -64,7 +64,8 @@ async def test_business_route_goes_straight_to_agent(monkeypatch):
 async def test_knowledge_weak_evidence_falls_back_and_pools(monkeypatch):
     calls = {}
 
-    async def fake_insert(conversation_id, raw_question, source, reason):
+    async def fake_insert(conversation_id, raw_question, source, reason,
+                          retrieved_chunks=None):
         calls.update(cid=conversation_id, source=source)
         return 1
 

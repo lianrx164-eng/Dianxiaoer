@@ -17,7 +17,8 @@ async def query_faq(keyword: str, category: str | None = None) -> dict:
     """查询常见问题/政策知识库(混合检索+重排)。用于政策、规则、时效、费用、商品手册等通用问题。
     返回带编号证据供作答引用;证据不足时返回 sufficient=False,请据此向用户拒答。"""
     result = await evidence.gather_evidence(keyword, category=category)
-    return {k: v for k, v in result.items() if k != "top"}
+    internal = {"top", "confidence", "signals", "snapshot"}
+    return {k: v for k, v in result.items() if k not in internal}
 
 
 # query_faq 走 RAG 管线(改写+混合检索+重排+自评,多次上游往返),远慢于默认 5s,
