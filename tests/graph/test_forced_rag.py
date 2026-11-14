@@ -56,6 +56,7 @@ async def test_classify_intent_writes_state(monkeypatch):
     monkeypatch.setattr(nodes.intent_mod, "classify", _aval("物流"))
     out = await nodes.classify_intent({"messages": [HumanMessage("快递到哪了")]})
     assert out["intent"] == "物流"
+    assert out["route"] == "business"
     assert out["trace"]["intent"] == "物流"
 
 

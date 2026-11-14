@@ -263,6 +263,47 @@
   .fb-done { display: none; color: #2f7d32; font-weight: 600; }
   .feedback.done .fb-done { display: inline; }
 
+  .action-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .action-btn {
+    font: 600 13px/1 "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #fff8ec;
+    border: 2px solid #1c1c1c;
+    box-shadow: 3px 3px 0 #1c1c1c;
+    padding: 8px 14px;
+    cursor: pointer;
+    transition: transform 0.06s, box-shadow 0.06s;
+  }
+  .action-btn:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 #1c1c1c; }
+  .action-btn:disabled { opacity: 0.45; cursor: default; box-shadow: none; transform: none; }
+
+  .modal-mask {
+    position: fixed; inset: 0; z-index: 60;
+    background: rgba(28, 28, 28, 0.45);
+    display: grid; place-items: center;
+  }
+  .ticket-form {
+    width: min(460px, 90vw);
+    background: #fdf6ea;
+    border: 3px solid #1c1c1c;
+    box-shadow: 8px 8px 0 #1c1c1c;
+    padding: 18px 20px 16px;
+    font-size: 14px;
+  }
+  .ticket-form h2 { margin: 0 0 14px; font-size: 17px; }
+  .ticket-form label { display: block; margin: 0 0 6px; font-weight: 600; }
+  .ticket-form select, .ticket-form textarea {
+    width: 100%;
+    border: 2px solid #1c1c1c;
+    background: #fffdf6;
+    font: inherit;
+    padding: 8px 10px;
+    margin-bottom: 14px;
+  }
+  .ticket-form textarea { min-height: 96px; resize: vertical; }
+  .ticket-form .err { color: #b3261e; font-size: 12px; min-height: 18px; margin: -6px 0 8px; }
+  .ticket-form .row-btns { display: flex; justify-content: flex-end; gap: 10px; }
+  .ticket-form .btn { box-shadow: 3px 3px 0 #1c1c1c; padding: 8px 14px; }
+
   @media (max-width: 560px) {
     body { padding: 0; place-items: stretch; }
     .app { width: 100%; height: 100vh; border: 0; box-shadow: none; }
@@ -614,6 +655,134 @@
     bubble.append(bar);
   }
 
+  function openTicketModal(triggerBtn) {
+    const mask = document.createElement('div');
+    mask.className = 'modal-mask';
+    const form = document.createElement('form');
+    form.className = 'ticket-form';
+    form.noValidate = true;   // 统一走下面的中文校验提示,不用浏览器原生气泡
+
+    const title = document.createElement('h2');
+    title.textContent = '创建工单';
+
+    const typeLabel = document.createElement('label');
+    typeLabel.textContent = '反馈类别';
+    typeLabel.htmlFor = 'ticketType';
+    const select = document.createElement('select');
+    select.id = 'ticketType';
+    select.required = true;
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = '请选择类别';
+    placeholder.disabled = true;
+    placeholder.selected = true;
+    select.append(placeholder);
+    for (const t of ['售后', '投诉', '咨询']) {
+      const opt = document.createElement('option');
+      opt.value = t;
+      opt.textContent = t;
+      select.append(opt);
+    }
+
+    const descLabel = document.createElement('label');
+    descLabel.textContent = '反馈描述';
+    descLabel.htmlFor = 'ticketDesc';
+    const desc = document.createElement('textarea');
+    desc.id = 'ticketDesc';
+    desc.required = true;
+    desc.placeholder = '请描述您遇到的问题';
+
+    const err = document.createElement('div');
+    err.className = 'err';
+
+    const btns = document.createElement('div');
+    btns.className = 'row-btns';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'btn';
+    cancel.textContent = '取消';
+    const submit = document.createElement('button');
+    submit.type = 'submit';
+    submit.className = 'btn';
+    submit.textContent = '提交工单';
+    btns.append(cancel, submit);
+
+    form.append(title, typeLabel, select, descLabel, desc, err, btns);
+    mask.append(form);
+    document.body.append(mask);
+    select.focus();
+
+    const close = () => {
+      mask.remove();
+      document.removeEventListener('keydown', onKey);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('keydown', onKey);
+    cancel.addEventListener('click', close);
+    mask.addEventListener('click', (e) => { if (e.target === mask) close(); });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      err.textContent = '';
+      if (!select.value || !desc.value.trim()) {
+        err.textContent = '请选择反馈类别并填写反馈描述';
+        return;
+      }
+      submit.disabled = true;
+      try {
+        const resp = await fetch('/api/actions/create-ticket', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            conversation_id: conversationId ? Number(conversationId) : null,
+            ticket_type: select.value,
+            description: desc.value.trim(),
+          }),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.detail || ('HTTP ' + resp.status));
+        close();
+        addAssistant('工单已创建:' + (data.ticket_no || ''));
+        triggerBtn.disabled = true;
+      } catch (ex) {
+        err.textContent = '工单创建失败,请稍后重试';
+        submit.disabled = false;
+      }
+    });
+  }
+
+  function renderActions(bubble, items) {
+    if (!items || !items.length) return;
+    const bar = document.createElement('div');
+    bar.className = 'action-bar';
+    for (const a of items) {
+      if (a.type === 'transfer_human') {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'action-btn';
+        btn.textContent = '转人工';
+        btn.addEventListener('click', () => {
+          btn.disabled = true;
+          // 本章纯前端模拟,不接真人系统
+          addAssistant('已转接人工客服');
+          addAssistant('您好,我是客服小猫,请问有什么可以帮您的');
+        });
+        bar.append(btn);
+      } else if (a.type === 'create_ticket') {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'action-btn';
+        btn.textContent = '建工单';
+        btn.addEventListener('click', () => openTicketModal(btn));
+        bar.append(btn);
+      }
+    }
+    if (bar.children.length) {
+      bubble.append(bar);
+      scrollToBottom();
+    }
+  }
+
   async function sendMessage(text) {
     text = text.trim();
     if (!text || busy) return;
@@ -630,6 +799,7 @@
         let started = false;
         let upstreamError = null;
         let citations = [];
+        let actions = [];
 
         try {
           const res = await fetch('/api/chat', {
@@ -675,6 +845,10 @@
                 if (rawText) textEl.innerHTML = renderWithCitations(rawText, citations);
                 continue;
               }
+              if (payload.event === 'actions') {
+                actions = Array.isArray(payload.items) ? payload.items : [];
+                continue;
+              }
               if (typeof payload.delta === 'string') {
                 if (!started) { started = true; textEl.innerHTML = ''; }
                 rawText += payload.delta;
@@ -686,6 +860,7 @@
           if (upstreamError) throw new Error(upstreamError);
           if (!rawText) textEl.textContent = '(小喵这次没有回复内容,请再试一次)';
           else addFeedback(bubble);
+          if (actions.length) renderActions(bubble, actions);
           textEl.classList.remove('streaming');
           return;
         } catch (err) {

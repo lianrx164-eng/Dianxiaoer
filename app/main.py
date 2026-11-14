@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -16,6 +17,16 @@ from app.api.rageval import router as rageval_router
 from app.graph import runtime
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+# 应用自己的 INFO 日志(节点 trace)不被 root 的 WARNING 挡掉;显式挂 handler,避免
+# uvicorn 先配好 logging 后 basicConfig 变成空操作
+_app_log = logging.getLogger("app")
+_app_log.setLevel(logging.INFO)
+_app_log.propagate = False
+if not _app_log.handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+    _app_log.addHandler(_h)
 
 
 @asynccontextmanager

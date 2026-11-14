@@ -13,6 +13,7 @@ from app.core.prompts import (
     FALLBACK_REPLY_TEXT,
 )
 from app.db import repository
+from app.graph.routing import route_by_intent
 from app.graph.state import trace_of
 from app.tools.infra import execute_tool_call
 from app.tools.registry import get_all_tools
@@ -81,9 +82,11 @@ async def coref(state) -> dict:
 
 
 async def classify_intent(state) -> dict:
-    """意图识别:单标签七类。"""
+    """意图识别:单标签七类,并落四出口供日志与下游使用。"""
     intent = await intent_mod.classify(_user_text(state))
-    return {"intent": intent, "trace": trace_of(state, intent=intent)}
+    route = route_by_intent({"intent": intent})
+    return {"intent": intent, "route": route,
+            "trace": trace_of(state, intent=intent, route=route)}
 
 
 async def forced_rag(state) -> dict:
