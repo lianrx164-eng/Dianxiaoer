@@ -11,9 +11,10 @@ import httpx
 
 from app.db import repository
 
-MISSING_Q = "平台支持花呗分期付款吗"
+MISSING_Q = "有没有以旧换新的活动"
 RATED_Q = "退货政策是什么样的"
-APPROVED_ANSWER = "支持花呗分期付款,具体可选期数以商品页支付方式为准。"
+APPROVED_ANSWER = "目前平台暂不支持以旧换新,后续活动请关注商品页公告。"
+EXPECT_KEYWORD = "以旧换新"
 
 
 def ok(name: str, cond: bool, detail: str = "") -> bool:
@@ -40,33 +41,33 @@ async def find_review_for(question: str):
     return None
 
 
-async def main(base_url: str) -> int:
+async def main(base_url: str, missing_q: str, approved_answer: str,
+               expect_keyword: str) -> int:
     checks = []
     async with httpx.AsyncClient(base_url=base_url, timeout=180) as c:
         # --- 验收 2:缺知识 → 兜底 + 落池 + 快照 ---
-        first = await ask(c, MISSING_Q)
+        first = await ask(c, missing_q)
         state = first.get("trace", {})
-        fallback = (not state.get("evidence_strong", True)) or bool(
-            first.get("suggested_actions"))
+        fallback = state.get("gate") in ("retrieval_low_conf", "self_check")
         checks.append(ok("验收2a 缺知识问题走兜底", fallback,
                          f"intent={state.get('intent')} gate={state.get('gate')}"))
         run_flywheel()
-        detail = await find_review_for(MISSING_Q)
+        detail = await find_review_for(missing_q)
         checks.append(ok("验收2b 飞轮把问题并入待审队列", detail is not None))
         if detail:
             item, raws = detail
-            raw = next(r for r in raws if r.raw_question == MISSING_Q)
+            raw = next(r for r in raws if r.raw_question == missing_q)
             checks.append(ok("验收2c 详情带用户原话与召回快照",
                              bool(raw.retrieved_chunks),
                              f"source={raw.source} chunks={len(raw.retrieved_chunks or [])}"))
 
             # --- 验收 3:审核通过写回 → 再问答对 ---
             r = await c.post(f"/api/review/{item.id}/approve",
-                             json={"approved_answer": APPROVED_ANSWER})
+                             json={"approved_answer": approved_answer})
             checks.append(ok("验收3a 审核通过并写回知识库", r.status_code == 200,
                              r.text[:80]))
-            second = await ask(c, MISSING_Q)
-            answered = "花呗" in (second.get("answer") or "")
+            second = await ask(c, missing_q)
+            answered = expect_keyword in (second.get("answer") or "")
             checks.append(ok("验收3b 同一问题再问能答对", answered,
                              (second.get("answer") or "")[:60]))
 
@@ -93,5 +94,10 @@ async def main(base_url: str) -> int:
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--base-url", default="http://127.0.0.1:8002")
+    # 一轮跑完会把答案写进知识库,想重复演示就换一条库里没有的新问题
+    ap.add_argument("--missing-question", default=MISSING_Q)
+    ap.add_argument("--approved-answer", default=APPROVED_ANSWER)
+    ap.add_argument("--expect-keyword", default=EXPECT_KEYWORD)
     args = ap.parse_args()
-    sys.exit(asyncio.run(main(args.base_url)))
+    sys.exit(asyncio.run(main(args.base_url, args.missing_question,
+                              args.approved_answer, args.expect_keyword)))
