@@ -86,10 +86,14 @@ async def main() -> int:
         if j > best_j:
             best_t, best_j = t, j
 
-    _log(f"\n推荐阈值 evidence_confidence_threshold = {best_t:.2f}(Youden J={best_j:.3f})")
-    if best_j < 0.3:
-        _log("⚠ 两桶分离度不足(J<0.3):别硬选,把分布表交给人工定夺。")
-    _log("请回填 app/config.py 默认值,并在 dev-notes/ch09.md 记录本次校准。")
+    separable = best_j >= 0.3
+    if separable:
+        _log(f"\n推荐阈值 evidence_confidence_threshold = {best_t:.2f}"
+             f"(Youden J={best_j:.3f})")
+        _log("请回填 app/config.py 默认值,并在 dev-notes/ch09.md 记录本次校准。")
+    else:
+        _log(f"\n⚠ 两桶分离度不足(J={best_j:.3f} < 0.3):不产出推荐值,"
+             "把分布表交给人工定夺。")
 
     _OUT_DIR.mkdir(parents=True, exist_ok=True)
     (_OUT_DIR / "confidence_calibration.txt").write_text(
@@ -98,11 +102,12 @@ async def main() -> int:
         "dataset_size": len(samples),
         "answerable": dist_a, "absent": dist_d,
         "curve": curve,
-        "recommended_threshold": best_t, "youden_j": round(best_j, 4),
-        "separable": best_j >= 0.3,
+        "recommended_threshold": best_t if separable else None,
+        "youden_j": round(best_j, 4),
+        "separable": separable,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
     _log(f"报告已落 {_OUT_DIR.relative_to(_ROOT)}/confidence_calibration.txt")
-    return 0 if best_j >= 0.3 else 0
+    return 0 if separable else 1
 
 
 if __name__ == "__main__":

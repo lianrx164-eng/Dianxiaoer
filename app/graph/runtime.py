@@ -8,7 +8,12 @@ from langgraph.types import Command
 
 from app.config import settings
 from app.core import context_budget, memory, summarizer
-from app.core.observability import attach_observability, flush as flush_observability, turn_span
+from app.core.observability import (
+    flush as flush_observability,
+    init_observability,
+    set_intent_attrs,
+    turn_span,
+)
 from app.db import repository
 from app.graph.build import build_graph
 
@@ -38,7 +43,8 @@ async def init_graph() -> None:
     _cm = AsyncSqliteSaver.from_conn_string(settings.checkpointer_db_path)
     _checkpointer = await _cm.__aenter__()
     await _checkpointer.setup()
-    _graph = attach_observability(build_graph(checkpointer=_checkpointer))
+    _graph = build_graph(checkpointer=_checkpointer)
+    init_observability()
     budget = context_budget.self_check()
     logger.info("上下文预算 window=%s fixed=%s peak=%s history=%s layer1=%s layer2=%s",
                 budget.window, budget.fixed, budget.react_peak,
@@ -176,14 +182,10 @@ def _trace_config(cid: int) -> dict:
     return {"configurable": {"thread_id": str(cid)}}
 
 
-def _mark_intent(span, state: dict) -> None:
+def _mark_intent(span, intent: str, confidence: float) -> None:
     """turn_span 结束时把意图补写到根 span(Phoenix trace 级过滤用)。"""
-    if span is None:
-        return
-    intent = state.get("intent")
-    if intent:
-        span.set_attribute("intent", intent)
-        span.set_attribute("intent.confidence", float(state.get("intent_confidence", 0.0)))
+    if span is not None and intent:
+        set_intent_attrs(span, intent, confidence)
 
 
 async def run_turn(user_id, message, conversation_id) -> dict:
@@ -207,17 +209,19 @@ async def run_turn(user_id, message, conversation_id) -> dict:
     async with turn_span(cid) as span:
         final = await graph.ainvoke(
             _graph_input(user_id, message, cid, prev_messages, ctx), config)
-        _mark_intent(span, final)
+        _mark_intent(span, final.get("intent", ""), final.get("intent_confidence", 0.0))
     await summarizer.maybe_schedule_summary(cid)
     return _turn_result(cid, final, prev_messages)
 
 
-async def _stream_events(cid: int, stream_source) -> AsyncIterator[dict]:
-    """把 astream 多模式映射成事件 dict;遇中断吐 interrupt 并结束本次流。"""
+async def _stream_events(cid: int, stream_source, intent: str = "",
+                         confidence: float = 0.0) -> AsyncIterator[dict]:
+    """把 astream 多模式映射成事件 dict;遇中断吐 interrupt 并结束本次流。
+    resume 轮不会重跑 classify_intent,故意图由调用方从上一轮终态带进来。"""
     config = _trace_config(cid)
     actions: list = []
     seen_actions: set = set()
-    intent_state: dict = {}
+    intent_text, intent_conf = intent, confidence
     async with turn_span(cid) as span:
         try:
             async for mode, chunk in get_graph().astream(
@@ -237,8 +241,8 @@ async def _stream_events(cid: int, stream_source) -> AsyncIterator[dict]:
                         if not isinstance(upd, dict):
                             continue
                         if node == "classify_intent" and upd.get("intent"):
-                            intent_state["intent"] = upd["intent"]
-                            intent_state["intent_confidence"] = upd.get("intent_confidence", 0.0)
+                            intent_text = upd["intent"]
+                            intent_conf = upd.get("intent_confidence", 0.0)
                         if node in DETERMINISTIC_ANSWER_NODES and upd.get("answer"):
                             yield {"type": "delta", "text": upd["answer"]}
                         if node in CITATION_NODES and upd.get("citations"):
@@ -250,7 +254,7 @@ async def _stream_events(cid: int, stream_source) -> AsyncIterator[dict]:
                                     yield {"type": "tool", "name": name}
                         _merge_actions(actions, seen_actions, upd.get("suggested_actions"))
         finally:
-            _mark_intent(span, intent_state)
+            _mark_intent(span, intent_text, intent_conf)
     if actions:
         yield {"type": "actions", "items": actions}
     yield {"type": "done", "conversation_id": cid}
@@ -279,7 +283,12 @@ async def stream_resume(conversation_id: int, resume_value) -> AsyncIterator[dic
     """前端点选订单后续跑同一会话的暂停流。"""
     if await repository.get_conversation(conversation_id) is None:
         raise ConversationNotFound(conversation_id)
-    async for ev in _stream_events(conversation_id, Command(resume=resume_value)):
+    config = _trace_config(conversation_id)
+    prev = await get_graph().aget_state(config)
+    values = prev.values or {}
+    async for ev in _stream_events(
+            conversation_id, Command(resume=resume_value),
+            values.get("intent", ""), values.get("intent_confidence", 0.0)):
         yield ev
     await summarizer.maybe_schedule_summary(conversation_id)
 
@@ -294,7 +303,7 @@ async def resume_turn(conversation_id: int, resume_value) -> dict:
     prev_messages = (prev.values or {}).get("messages", []) if prev else []
     async with turn_span(conversation_id) as span:
         final = await graph.ainvoke(Command(resume=resume_value), config)
-        _mark_intent(span, final)
+        _mark_intent(span, final.get("intent", ""), final.get("intent_confidence", 0.0))
     await summarizer.maybe_schedule_summary(conversation_id)
     return _turn_result(conversation_id, final, prev_messages)
 
@@ -302,7 +311,7 @@ async def resume_turn(conversation_id: int, resume_value) -> dict:
 async def get_turn_snapshot(conversation_id: int) -> dict:
     """👎 快照尽力回捞:读该会话 checkpointer 终态,返回最近一轮的用户问题与召回快照。
     调用方拿去比对被踩的 question,对得上才用快照——踩历史消息时快照可能已是别轮的,不硬塞。"""
-    config = {"configurable": {"thread_id": str(conversation_id)}}
+    config = _trace_config(conversation_id)
     st = await get_graph().aget_state(config)
     values = getattr(st, "values", None) or {}
     question = ""

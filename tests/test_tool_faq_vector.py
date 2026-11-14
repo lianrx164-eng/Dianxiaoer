@@ -24,6 +24,8 @@ async def test_query_faq_maps_hits_to_citations(monkeypatch):
     assert out["sufficient"] is True
     assert out["citations"][0]["question"] == "运费怎么算"
     assert out["citations"][0]["section_path"] == "运费政策"
+    # ch09:工具把召回快照挂在内部键上,由引擎剥走传给 agent_tools
+    assert out["_snapshot"][0]["question"] == "运费怎么算"
 
 
 async def test_query_faq_empty_returns_refusal(monkeypatch):

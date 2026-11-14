@@ -7,10 +7,14 @@ def test_disabled_when_endpoint_missing(monkeypatch):
     assert observability.phoenix_enabled() is False
 
 
-def test_attach_returns_graph_unchanged_when_disabled(monkeypatch):
+def test_init_noop_when_disabled(monkeypatch):
     monkeypatch.setattr("app.config.settings.phoenix_endpoint", "")
-    sentinel = object()
-    assert observability.attach_observability(sentinel) is sentinel
+
+    def boom():
+        raise AssertionError("未配置时不许插桩")
+
+    monkeypatch.setattr(observability, "_instrument", boom)
+    observability.init_observability()
 
 
 def test_tag_intent_noop_when_disabled(monkeypatch):
@@ -23,7 +27,7 @@ def test_flush_noop_when_disabled(monkeypatch):
     observability.flush()
 
 
-def test_attach_instruments_once_and_returns_graph(monkeypatch):
+def test_init_instruments_once(monkeypatch):
     monkeypatch.setattr("app.config.settings.phoenix_endpoint", "http://localhost:6006/v1/traces")
     monkeypatch.setattr(observability, "_enabled_impl", False)
     calls = []
@@ -33,9 +37,8 @@ def test_attach_instruments_once_and_returns_graph(monkeypatch):
         observability._enabled_impl = True
 
     monkeypatch.setattr(observability, "_instrument", fake_instrument)
-    graph = object()
-    assert observability.attach_observability(graph) is graph
-    assert observability.attach_observability(graph) is graph
+    observability.init_observability()
+    observability.init_observability()
     assert calls == [1]                       # 只挂一次
 
 

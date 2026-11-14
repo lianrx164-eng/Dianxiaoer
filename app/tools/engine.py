@@ -2,6 +2,7 @@
 管道:查工具 → JSON Schema 校验 → 权限门 → 执行(超时/重试)→ 分诊 → 格式化 + 审计。
 坏消息如实回灌模型;审计写失败只 log,绝不反拦工具执行。"""
 import asyncio
+import contextvars
 import json
 import logging
 import time
@@ -52,6 +53,12 @@ def _timeout_of(spec: ToolSpec) -> float:
 
 def _summarize(content: str) -> str:
     return content if len(content) <= _SUMMARY_LIMIT else content[:_SUMMARY_LIMIT] + "…(截断)"
+
+
+# ch09:工具自报的内部快照(如 query_faq)由引擎剥走,不透给模型;
+# agent_tools 在执行完工具后读走写进 retrieved_snapshot。
+LAST_TOOL_SNAPSHOT: contextvars.ContextVar[list] = contextvars.ContextVar(
+    "mewhelp_tool_snapshot", default=[])
 
 
 def _flatten_content(result):
@@ -150,6 +157,9 @@ async def execute_tool_call(
     while True:
         try:
             result = await asyncio.wait_for(spec.tool.ainvoke(args), timeout=tool_timeout)
+            result = _flatten_content(result)
+            if isinstance(result, dict) and "_snapshot" in result:
+                LAST_TOOL_SNAPSHOT.set(result.pop("_snapshot") or [])
             content = _format_content(spec, result)
             run = _run(True, content, "成功", attempt)
             await _audit(conversation_id, tc_id, name, spec, model_args, _summarize(content),

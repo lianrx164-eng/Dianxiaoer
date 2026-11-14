@@ -285,6 +285,7 @@ async def test_stream_resume_uses_command(monkeypatch):
     from langgraph.types import Command
 
     seen = {}
+    marked = []
 
     class FakeGraph:
         async def astream(self, inp, config, stream_mode=None):
@@ -292,13 +293,28 @@ async def test_stream_resume_uses_command(monkeypatch):
             seen["resume"] = getattr(inp, "resume", None)
             yield ("updates", {"agent_llm": {"messages": []}})
 
+        async def aget_state(self, config):
+            from types import SimpleNamespace
+            return SimpleNamespace(values={"intent": "退款退货", "intent_confidence": 0.9})
+
     async def fake_get(cid):
         return object()
 
     monkeypatch.setattr(runtime.repository, "get_conversation", fake_get)
     monkeypatch.setattr(runtime, "get_graph", lambda: FakeGraph())
+    monkeypatch.setattr(runtime, "set_intent_attrs",
+                        lambda span, intent, conf: marked.append((intent, conf)))
+
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def fake_turn_span(cid):
+        yield object()
+
+    monkeypatch.setattr(runtime, "turn_span", fake_turn_span)
     events = [e async for e in runtime.stream_resume(5, "1001")]
     assert seen["is_command"] and seen["resume"] == "1001"
+    assert marked == [("退款退货", 0.9)]      # resume 轮从上一轮终态补 trace 意图
     assert events[-1] == {"type": "done", "conversation_id": 5}
 
 

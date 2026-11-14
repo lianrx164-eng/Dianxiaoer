@@ -18,7 +18,9 @@ from app.core.confidence import compute_evidence_confidence
 from app.core.llm import get_chat_model
 from app.core.prompts import RAG_ANSWER_PROMPT
 from app.db import repository
-from scripts.eval_ch04 import _evidence, _load, _load_absent, _mean, _ranks, _try
+from scripts.eval_ch04 import (
+    format_evidence, load_absent, load_samples, mean, ranks, try_call,
+)
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent
 _OUT = _ROOT / "data/ch09/reports/eval_trend.txt"
@@ -41,31 +43,31 @@ async def _eval_sample(sample: dict) -> tuple[float, float, bool | None] | None:
             return None
         groups = sample.get("expect_sections_all") or []
         if groups:
-            ranks = _ranks(hits, groups)
-            recall = sum(1 for r in ranks if r and r <= _RECALL_K) / len(ranks)
-            mrr = sum((1 / r if r else 0.0) for r in ranks) / len(ranks)
+            hit_ranks = ranks(hits, groups)
+            recall = sum(1 for r in hit_ranks if r and r <= _RECALL_K) / len(hit_ranks)
+            mrr = sum((1 / r if r else 0.0) for r in hit_ranks) / len(hit_ranks)
         else:
             recall = mrr = 0.0
-        ans = await _try(
+        ans = await try_call(
             (RAG_ANSWER_PROMPT | get_chat_model()).ainvoke(
-                {"query": sample["query"], "evidence": _evidence(hits)}),
+                {"query": sample["query"], "evidence": format_evidence(hits)}),
             f"gen:{sample['id']}")
     if ans is None:
         return recall, mrr, None
     text = ans.content if isinstance(ans.content, str) else str(ans.content)
-    verdict = await _try(judges.judge_faithfulness(_evidence(hits), text),
-                         f"faith:{sample['id']}")
+    verdict = await try_call(judges.judge_faithfulness(format_evidence(hits), text),
+                             f"faith:{sample['id']}")
     return recall, mrr, (None if verdict is None else verdict[0])
 
 
 async def _refused(sample: dict) -> bool | None:
-    pair = await _try(evidence.retrieve_hits(sample["query"]), f"ret:{sample['id']}")
+    pair = await try_call(evidence.retrieve_hits(sample["query"]), f"ret:{sample['id']}")
     if pair is None:
         return None
     _, hits = pair
     if compute_evidence_confidence(hits).score < settings.evidence_confidence_threshold:
         return True
-    chk = await _try(selfcheck.check_sufficient(
+    chk = await try_call(selfcheck.check_sufficient(
         sample["query"], [f"{h['question']} {h['answer']}" for h in hits]),
         f"refusal:{sample['id']}")
     return None if chk is None else not chk["useful"]
@@ -80,15 +82,15 @@ async def _refusal_guarded(sample: dict):
 
 
 async def run_once() -> dict:
-    graded = _load()
-    absent = _load_absent()
+    graded = load_samples()
+    absent = load_absent()
 
     results = [r for r in await asyncio.gather(*(_eval_sample(s) for s in graded))
                if r is not None]
-    recall = _mean([r[0] for r in results]) or 0.0
-    mrr = _mean([r[1] for r in results]) or 0.0
+    recall = mean([r[0] for r in results]) or 0.0
+    mrr = mean([r[1] for r in results]) or 0.0
     faiths = [r[2] for r in results if r[2] is not None]
-    faithfulness = _mean([1.0 if f else 0.0 for f in faiths]) or 0.0
+    faithfulness = mean([1.0 if f else 0.0 for f in faiths]) or 0.0
 
     refusals = [r for r in await asyncio.gather(*(_refusal_guarded(s) for s in absent))
                 if r is not None]

@@ -77,8 +77,9 @@ async def approve(review_id: int, req: ApproveRequest) -> dict:
         raise HTTPException(status_code=502,
                             detail="写回知识库失败(检查上游/Milvus),状态未变可重试")
 
-    await repository.update_review_status(review_id, "通过",
-                                          approved_answer=req.approved_answer)
+    if not await repository.update_review_status(review_id, "通过",
+                                                 approved_answer=req.approved_answer):
+        raise HTTPException(status_code=409, detail="状态已被其他审核操作变更,请刷新")
     logger.info("审核通过 review=%s → knowledge_chunks %s(已向量化,下一问可检索)",
                 review_id, chunk_ids)
     return {"ok": True, "chunk_ids": chunk_ids}

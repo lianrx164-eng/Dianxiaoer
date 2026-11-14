@@ -39,13 +39,10 @@ def _instrument() -> None:
     _enabled_impl = True
 
 
-def attach_observability(graph):
-    """启动时插桩一次;未配置时原样返回,不 import Phoenix。"""
-    if not phoenix_enabled():
-        return graph
-    if not _enabled_impl:
+def init_observability() -> None:
+    """启动时插桩一次;未配置时什么都不做,也不 import Phoenix。"""
+    if phoenix_enabled() and not _enabled_impl:
         _instrument()
-    return graph
 
 
 @asynccontextmanager
@@ -66,6 +63,14 @@ async def turn_span(conversation_id: int):
                 _root_span.reset(token)
 
 
+def set_intent_attrs(span, intent: str, confidence: float) -> None:
+    """把意图写到指定 span;span 为空/不可记录时安静跳过。"""
+    if span is None or not getattr(span, "is_recording", lambda: False)():
+        return
+    span.set_attribute("intent", intent)
+    span.set_attribute("intent.confidence", float(confidence))
+
+
 def tag_intent(intent: str, confidence: float) -> None:
     """把意图写进当前节点 span(Cost Control 按意图分堆的钩子)。
     根 span 可能在独立上下文里取不到,故运行结束时由 runtime 再用 state 补写一次。
@@ -75,11 +80,8 @@ def tag_intent(intent: str, confidence: float) -> None:
     try:
         from opentelemetry import trace
 
-        spans = [trace.get_current_span(), _root_span.get()]
-        for span in spans:
-            if span is not None and getattr(span, "is_recording", lambda: False)():
-                span.set_attribute("intent", intent)
-                span.set_attribute("intent.confidence", float(confidence))
+        set_intent_attrs(trace.get_current_span(), intent, confidence)
+        set_intent_attrs(_root_span.get(), intent, confidence)
     except Exception:
         logger.debug("phoenix tag_intent 失败(已忽略)", exc_info=True)
 

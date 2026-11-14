@@ -72,3 +72,25 @@ async def test_agent_tools_executes_normal_tool(monkeypatch):
     out = await nodes.agent_tools({"messages": [ai], "conversation_id": 5})
     assert out["messages"][0].name == "query_logistics"
     assert not out.get("suggested_actions")
+
+
+@pytest.mark.asyncio
+async def test_agent_tools_captures_query_faq_snapshot(monkeypatch):
+    snap = [{"question": "q", "answer": "a", "rerank_score": 0.4, "section_path": "s"}]
+
+    async def fake_exec(tc, cid, specs):
+        nodes.engine.LAST_TOOL_SNAPSHOT.set(snap)
+        return ToolRun(tool_call_id=tc["id"], name=tc["name"], ok=True,
+                       tool_message=ToolMessage(content='{"sufficient":true}',
+                                                tool_call_id=tc["id"], name=tc["name"]),
+                       status="成功")
+
+    async def fake_specs():
+        return registry.builtin_specs()
+
+    monkeypatch.setattr(nodes.engine, "execute_tool_call", fake_exec)
+    monkeypatch.setattr(nodes.registry, "get_all_specs", fake_specs)
+    ai = AIMessage("", tool_calls=[{"name": "query_faq", "args": {"keyword": "q"},
+                                    "id": "t2"}])
+    out = await nodes.agent_tools({"messages": [ai], "conversation_id": 5})
+    assert out["retrieved_snapshot"] == snap

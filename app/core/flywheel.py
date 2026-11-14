@@ -24,15 +24,12 @@ class NormalizeResult(BaseModel):
     ai_suggested_answer: str = Field(default="", description="示例答案备查")
 
 
-def _chain():
-    return FLYWHEEL_NORMALIZE_PROMPT | structured_model(NormalizeResult)
-
-
 async def normalize_and_match(raw_question: str, candidates: list[dict]) -> NormalizeResult:
     """一次模型调用输出 {normalized_question, matched_question_id, ai_suggested_answer}。"""
     cand_text = "\n".join(
         f"- id={c['id']}: {c['normalized_question']}" for c in candidates) or "(无候选)"
-    return await _chain().ainvoke({"raw_question": raw_question, "candidates": cand_text})
+    chain = FLYWHEEL_NORMALIZE_PROMPT | structured_model(NormalizeResult)
+    return await chain.ainvoke({"raw_question": raw_question, "candidates": cand_text})
 
 
 async def process_pending(limit: int = 50) -> dict:

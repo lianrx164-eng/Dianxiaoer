@@ -379,6 +379,7 @@ async def agent_tools(state) -> dict:
             decision = {"confirmed": False}
 
     tool_msgs = []
+    snapshot: list = []
     actions = list(state.get("suggested_actions") or [])
     seen = {(a["type"], str(a.get("draft"))) for a in actions}
     for tc in last.tool_calls:
@@ -418,7 +419,11 @@ async def agent_tools(state) -> dict:
         else:
             run = await engine.execute_tool_call(tc, cid, specs)
             tool_msgs.append(run.tool_message)
+            if tc["name"] == "query_faq":
+                snapshot = engine.LAST_TOOL_SNAPSHOT.get()   # 工具路检索快照,供 👎 回捞
     out = {"messages": tool_msgs}
+    if snapshot:
+        out["retrieved_snapshot"] = snapshot
     if ticket_calls and decision is None:
         out["ticket_followup"] = True     # 参数不全、模型要追问:下一轮粘一轮 business
     if actions:

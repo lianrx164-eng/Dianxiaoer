@@ -434,5 +434,14 @@ async def main() -> None:
     _log(f"report -> {OUT_JSON}")
 
 
+# ch09 评估流水线复用的公共入口(内部仍用下划线名,避免改一大片)
+load_samples = _load
+load_absent = _load_absent
+mean = _mean
+ranks = _ranks
+try_call = _try
+format_evidence = _evidence
+
+
 if __name__ == "__main__":
     asyncio.run(main())

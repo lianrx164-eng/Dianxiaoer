@@ -5,15 +5,17 @@ expect_keywords = 标准化对(仅新建样例查关键词)。两项都对才算
 """
 import asyncio
 import json
+import pathlib
 import sys
 
 from app.core.flywheel import normalize_and_match
 
 THRESHOLD = 0.8
+_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
 async def main():
-    with open("tests/data/flywheel_samples.json", encoding="utf-8") as f:
+    with open(_ROOT / "tests/data/flywheel_samples.json", encoding="utf-8") as f:
         samples = json.load(f)
     passed = 0
     for s in samples:
