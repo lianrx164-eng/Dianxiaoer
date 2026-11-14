@@ -8,7 +8,7 @@ from langgraph.types import Command
 
 from app.config import settings
 from app.core import context_budget, memory, summarizer
-from app.core.observability import attach_observability
+from app.core.observability import attach_observability, flush as flush_observability
 from app.db import repository
 from app.graph.build import build_graph
 
@@ -53,6 +53,7 @@ async def close_graph() -> None:
         _cm = None
     _graph = None
     _checkpointer = None
+    flush_observability()
 
 
 def get_graph():

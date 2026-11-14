@@ -43,6 +43,16 @@ def get_langfuse():
     return _init_client()
 
 
+def flush() -> None:
+    """进程退出前把缓冲的 span 刷给 Langfuse;未启用或失败都静默。"""
+    if _client is None:
+        return
+    try:
+        _client.flush()
+    except Exception:
+        logger.debug("langfuse flush 失败(已忽略)", exc_info=True)
+
+
 def attach_observability(graph):
     """编译后挂一次 Langfuse 回调,全图自动 trace。
     未配置时原样返回——不挂、不 import langfuse。"""

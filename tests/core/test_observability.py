@@ -25,6 +25,11 @@ def test_get_langfuse_none_when_disabled(monkeypatch):
     assert observability.get_langfuse() is None
 
 
+def test_flush_noop_when_disabled(monkeypatch):
+    monkeypatch.setattr(observability, "_client", None)
+    observability.flush()   # 不抛即可
+
+
 def test_attach_wraps_with_callbacks_when_enabled(monkeypatch):
     monkeypatch.setattr("app.config.settings.langfuse_public_key", "pk")
     monkeypatch.setattr("app.config.settings.langfuse_secret_key", "sk")

@@ -32,33 +32,37 @@ def _log(msg: str = "") -> None:
     _LINES.append(msg)
 
 
-async def _retrieval_scores(sample: dict) -> tuple[float, float] | None:
-    _, hits = await evidence.retrieve_hits(sample["query"])
-    groups = sample.get("expect_sections_all") or []
-    if not groups:
-        return None
-    ranks = _ranks(hits, groups)
-    recall = sum(1 for r in ranks if r and r <= _RECALL_K) / len(ranks)
-    mrr = sum((1 / r if r else 0.0) for r in ranks) / len(ranks)
-    return recall, mrr
-
-
-async def _faithful(sample: dict) -> bool | None:
-    _, hits = await evidence.retrieve_hits(sample["query"])
-    ans = await _try(
-        (RAG_ANSWER_PROMPT | get_chat_model()).ainvoke(
-            {"query": sample["query"], "evidence": _evidence(hits)}),
-        f"gen:{sample['id']}")
+async def _eval_sample(sample: dict) -> tuple[float, float, bool | None] | None:
+    """一条样本一次检索:同时算检索指标与生成忠实度(避免重复嵌入/重排)。"""
+    async with _SEM:
+        try:
+            _, hits = await asyncio.wait_for(evidence.retrieve_hits(sample["query"]), 60)
+        except Exception:
+            return None
+        groups = sample.get("expect_sections_all") or []
+        if groups:
+            ranks = _ranks(hits, groups)
+            recall = sum(1 for r in ranks if r and r <= _RECALL_K) / len(ranks)
+            mrr = sum((1 / r if r else 0.0) for r in ranks) / len(ranks)
+        else:
+            recall = mrr = 0.0
+        ans = await _try(
+            (RAG_ANSWER_PROMPT | get_chat_model()).ainvoke(
+                {"query": sample["query"], "evidence": _evidence(hits)}),
+            f"gen:{sample['id']}")
     if ans is None:
-        return None
+        return recall, mrr, None
     text = ans.content if isinstance(ans.content, str) else str(ans.content)
     verdict = await _try(judges.judge_faithfulness(_evidence(hits), text),
                          f"faith:{sample['id']}")
-    return None if verdict is None else verdict[0]
+    return recall, mrr, (None if verdict is None else verdict[0])
 
 
 async def _refused(sample: dict) -> bool | None:
-    _, hits = await evidence.retrieve_hits(sample["query"])
+    pair = await _try(evidence.retrieve_hits(sample["query"]), f"ret:{sample['id']}")
+    if pair is None:
+        return None
+    _, hits = pair
     if compute_evidence_confidence(hits).score < settings.evidence_confidence_threshold:
         return True
     chk = await _try(selfcheck.check_sufficient(
@@ -70,10 +74,6 @@ async def _refused(sample: dict) -> bool | None:
 async def _one(kind: str, sample: dict):
     async with _SEM:
         try:
-            if kind == "retrieval":
-                return await _retrieval_scores(sample)
-            if kind == "faith":
-                return await _faithful(sample)
             return await _refused(sample)
         except Exception:
             return None
@@ -83,13 +83,11 @@ async def run_once() -> dict:
     graded = _load()
     absent = _load_absent()
 
-    ret = await asyncio.gather(*(_one("retrieval", s) for s in graded))
-    pairs = [p for p in ret if p is not None]
-    recall = _mean([p[0] for p in pairs]) or 0.0
-    mrr = _mean([p[1] for p in pairs]) or 0.0
-
-    faiths = [f for f in await asyncio.gather(*(_one("faith", s) for s in graded))
-              if f is not None]
+    results = [r for r in await asyncio.gather(*(_eval_sample(s) for s in graded))
+               if r is not None]
+    recall = _mean([r[0] for r in results]) or 0.0
+    mrr = _mean([r[1] for r in results]) or 0.0
+    faiths = [r[2] for r in results if r[2] is not None]
     faithfulness = _mean([1.0 if f else 0.0 for f in faiths]) or 0.0
 
     refusals = [r for r in await asyncio.gather(*(_one("refusal", s) for s in absent))
