@@ -1,17 +1,17 @@
 from langchain_core.messages import AIMessage
 
 from app.config import settings
-from app.core.intent import Intent
 
-# 七类意图 → 四出口(写死在代码里的分流规则,spec §3.1)
-INTENT_TO_ROUTE: dict[Intent, str] = {
+# 八类意图 → 五出口(写死在代码里的分流规则,spec §3.1;返回值 = build.py 条件边映射键)
+INTENT_TO_ROUTE: dict[str, str] = {
+    "投诉": "escalate",
+    "闲聊": "fallback_script",
+    "其他": "fallback_script",
     "商品咨询": "knowledge",
-    "退款退货": "knowledge",
+    "退款退货": "refund_flow",
+    "售后": "refund_flow",
     "物流": "business",
     "订单": "business",
-    "售后": "business",
-    "投诉": "complaint",
-    "闲聊": "chitchat",
 }
 
 
