@@ -18,8 +18,9 @@ class ConversationState(TypedDict, total=False):
     layer1_from_msg_id: int             # 层1起点;id > 此值为原文
     user_id: str
     conversation_id: int
-    intent: str            # 八类之一(含「其他」)
+    intent: str            # 九类之一(含「其他」)
     intent_confidence: float  # 意图 JSON 的 confidence(0-1),不参与分流
+    ticket_followup: bool  # ch08 建单追问后的下一轮粘滞标记,classify_intent 消费即清
     route: str             # escalate | fallback_script | knowledge | refund_flow | business
     resolved_query: str    # 指代消解 + 改写后的完整问句,下游检索/判意图都用它
     order_id: str          # refund_flow:抽到/点选回填的订单号

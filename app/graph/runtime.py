@@ -114,7 +114,9 @@ def _graph_input(user_id: str, message: str, cid: int,
         "summary": ctx["summary"],
         "summary_upto_msg_id": ctx["summary_upto_msg_id"],
         "layer1_from_msg_id": ctx["layer1_from_msg_id"],
-        # 每轮显式重置:这些是普通字段,不重置会残留上一轮的键/答案/按钮
+        # 每轮显式重置:这些是普通字段,不重置会残留上一轮的键/答案/按钮。
+        # ticket_followup 故意不在此列:建单追问的粘滞标记要跨轮留在 checkpoint 里,
+        # 由 classify_intent 消费后清零。
         "intent": "", "route": "", "evidence": "", "citations": [],
         "evidence_strong": False, "answer": "", "steps": 0, "tokens_used": 0,
         "suggested_actions": [], "trace": {},

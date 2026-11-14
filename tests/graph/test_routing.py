@@ -10,7 +10,7 @@ def test_route_by_intent_five_outlets():
     cases = {
         "投诉": "escalate", "闲聊": "fallback_script", "其他": "fallback_script",
         "商品咨询": "knowledge", "退款退货": "refund_flow", "售后": "refund_flow",
-        "物流": "business", "订单": "business",
+        "物流": "business", "订单": "business", "人工": "business",
     }
     for intent, route in cases.items():
         assert route_by_intent({"intent": intent}) == route
@@ -21,9 +21,9 @@ def test_route_unknown_intent_defaults_business():
     assert route_by_intent({}) == "business"
 
 
-def test_intent_to_route_covers_eight_classes():
+def test_intent_to_route_covers_nine_classes():
     assert set(INTENT_TO_ROUTE) == {
-        "投诉", "闲聊", "其他", "商品咨询", "退款退货", "售后", "物流", "订单"}
+        "投诉", "闲聊", "其他", "商品咨询", "退款退货", "售后", "物流", "订单", "人工"}
 
 
 def test_confidence_gate():

@@ -2,7 +2,7 @@ from langchain_core.messages import AIMessage
 
 from app.config import settings
 
-# 八类意图 → 五出口(写死在代码里的分流规则,spec §3.1;返回值 = build.py 条件边映射键)
+# 九类意图 → 五出口(写死在代码里的分流规则,spec §3.1;返回值 = build.py 条件边映射键)
 INTENT_TO_ROUTE: dict[str, str] = {
     "投诉": "escalate",
     "闲聊": "fallback_script",
@@ -12,6 +12,7 @@ INTENT_TO_ROUTE: dict[str, str] = {
     "售后": "refund_flow",
     "物流": "business",
     "订单": "business",
+    "人工": "business",
 }
 
 

@@ -9,17 +9,17 @@ from app.core.prompts import INTENT_CLASSIFY_PROMPT
 
 logger = logging.getLogger(__name__)
 
-Intent = Literal["物流", "订单", "商品咨询", "退款退货", "售后", "投诉", "闲聊", "其他"]
+Intent = Literal["物流", "订单", "商品咨询", "退款退货", "售后", "投诉", "闲聊", "人工", "其他"]
 INTENTS: tuple[str, ...] = get_args(Intent)
 
 
 class _Intent(BaseModel):
-    intent: Intent = Field(description="八类意图之一")
+    intent: Intent = Field(description="九类意图之一")
     confidence: float = Field(ge=0.0, le=1.0, description="判断把握 0-1(必填)")
 
 
 async def classify(query: str, history: str = "") -> dict:
-    """八类意图 + confidence。扁平字段避开 glm 嵌套 502;解析失败/越界 → 归「其他」
+    """九类意图 + confidence。扁平字段避开 glm 嵌套 502;解析失败/越界 → 归「其他」
     (最保守兜底,替换 ch05 的回退闲聊)。模型默认走 settings.intent_model(空则回落
     chat_model)——先求准。"""
     model = get_chat_model(model=settings.intent_model or None,

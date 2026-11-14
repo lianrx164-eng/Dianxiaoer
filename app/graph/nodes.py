@@ -126,9 +126,15 @@ async def coref(state) -> dict:
 
 
 async def classify_intent(state) -> dict:
-    """意图四件套:八类 + confidence + 「其他」兜底。吃 resolved_query(空则回落原话)+
+    """意图四件套:九类 + confidence + 「其他」兜底。吃 resolved_query(空则回落原话)+
     最近历史判当前意图(应对物流→退款→物流漂移)。把归属出口 route 落进 State(供
-    _agent_messages 判注入、log 留痕;route_by_intent 条件边按同一 INTENT_TO_ROUTE 分流)。"""
+    _agent_messages 判注入、log 留痕;route_by_intent 条件边按同一 INTENT_TO_ROUTE 分流)。
+    建单追问后的补充句单看会被判售后/商品咨询,靠 ticket_followup 粘一轮、直接走 business。"""
+    if state.get("ticket_followup"):
+        return {"intent": "人工", "intent_confidence": 1.0, "route": "business",
+                "ticket_followup": False,
+                "trace": trace_of(state, intent="人工", intent_confidence=1.0,
+                                  route="business", ticket_followup=True)}
     query = state.get("resolved_query") or _user_text(state)
     r = await intent_mod.classify(query, _history_text(state))
     intent, conf = r["intent"], r["confidence"]
@@ -373,6 +379,8 @@ async def agent_tools(state) -> dict:
             run = await engine.execute_tool_call(tc, cid, specs)
             tool_msgs.append(run.tool_message)
     out = {"messages": tool_msgs}
+    if ticket_calls and decision is None:
+        out["ticket_followup"] = True     # 参数不全、模型要追问:下一轮粘一轮 business
     if actions:
         out["suggested_actions"] = actions
     return out
