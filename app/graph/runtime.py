@@ -116,6 +116,14 @@ def _merge_actions(actions: list, seen: set, incoming: list) -> None:
             seen.add(key)
 
 
+def _turn_result(cid: int, final: dict, prev_messages: list) -> dict:
+    """本轮新增消息切片 + 统一返回形状(run_turn / resume_turn 共用)。"""
+    turn = final.get("messages", [])[len(prev_messages):]
+    return {"conversation_id": cid,
+            "state": {**final, "turn_messages": turn},
+            "interrupt": _interrupt_orders(final)}
+
+
 async def run_turn(user_id, message, conversation_id) -> dict:
     """非流式:ainvoke → 返回终态(供 /api/agent、eval)。
 
@@ -135,10 +143,7 @@ async def run_turn(user_id, message, conversation_id) -> dict:
     prev_messages = (prev.values or {}).get("messages", []) if prev else []
     final = await graph.ainvoke(
         _graph_input(user_id, message, cid, prev_messages), config)
-    turn = final.get("messages", [])[len(prev_messages):]
-    return {"conversation_id": cid,
-            "state": {**final, "turn_messages": turn},
-            "interrupt": _interrupt_orders(final)}
+    return _turn_result(cid, final, prev_messages)
 
 
 async def _stream_events(cid: int, stream_source) -> AsyncIterator[dict]:
@@ -203,7 +208,7 @@ async def stream_resume(conversation_id: int, resume_value) -> AsyncIterator[dic
 
 
 async def resume_turn(conversation_id: int, resume_value) -> dict:
-    """非流式续跑(供 /api/agent、eval):Command(resume) 回填后跑到下一个中断或结束。"""
+    """非流式续跑(供 eval/脚本);SSE 入口用 stream_resume。"""
     if await repository.get_conversation(conversation_id) is None:
         raise ConversationNotFound(conversation_id)
     config = {"configurable": {"thread_id": str(conversation_id)}}
@@ -211,7 +216,4 @@ async def resume_turn(conversation_id: int, resume_value) -> dict:
     prev = await graph.aget_state(config)
     prev_messages = (prev.values or {}).get("messages", []) if prev else []
     final = await graph.ainvoke(Command(resume=resume_value), config)
-    turn = final.get("messages", [])[len(prev_messages):]
-    return {"conversation_id": conversation_id,
-            "state": {**final, "turn_messages": turn},
-            "interrupt": _interrupt_orders(final)}
+    return _turn_result(conversation_id, final, prev_messages)

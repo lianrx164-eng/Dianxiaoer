@@ -15,7 +15,7 @@ INTENTS: tuple[str, ...] = get_args(Intent)
 
 class _Intent(BaseModel):
     intent: Intent = Field(description="八类意图之一")
-    confidence: float = Field(default=0.5, ge=0.0, le=1.0, description="判断把握 0-1")
+    confidence: float = Field(ge=0.0, le=1.0, description="判断把握 0-1(必填)")
 
 
 async def classify(query: str, history: str = "") -> dict:

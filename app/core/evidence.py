@@ -3,6 +3,20 @@ from app.config import settings
 from app.core import query_understanding, retrieval, selfcheck
 
 
+def build_citations(arranged: list) -> tuple[list[dict], str]:
+    """把排好序的命中转成编号 citations 与编号证据文本。
+    知识路(forced_rag)与退款路(retrieve_policy)共用,避免两处拼装漂移。"""
+    citations = [
+        {"n": i + 1, "id": h["id"], "chunk_id": h["id"],
+         "section_path": h["section_path"], "question": h["question"],
+         "answer": h["answer"], "content_type": h["content_type"]}
+        for i, h in enumerate(arranged)
+    ]
+    text = "\n".join(f"[{c['n']}] {c['question']}: {c['answer']}"
+                     for c in citations)
+    return citations, text
+
+
 async def gather_evidence(query_raw: str, category: str | None = None) -> dict:
     """理解 → 混合检索 → 检索分闸 → 自评闸 → 首尾组装。
 
@@ -32,11 +46,6 @@ async def gather_evidence(query_raw: str, category: str | None = None) -> dict:
                 "reason": chk["reason"], "citations": [], "top": top}
 
     arranged = retrieval.arrange_head_tail(hits)
-    citations = [
-        {"n": i + 1, "id": h["id"], "chunk_id": h["id"],
-         "section_path": h["section_path"], "question": h["question"],
-         "answer": h["answer"], "content_type": h["content_type"]}
-        for i, h in enumerate(arranged)
-    ]
-    evidence = "\n".join(f"[{c['n']}] {c['question']}: {c['answer']}" for c in citations)
-    return {"sufficient": True, "evidence": evidence, "citations": citations, "top": top}
+    citations, evidence_text = build_citations(arranged)
+    return {"sufficient": True, "evidence": evidence_text,
+            "citations": citations, "top": top}

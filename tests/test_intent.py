@@ -1,6 +1,14 @@
 import pytest
+from pydantic import ValidationError
 
 from app.core import intent
+
+
+def test_intent_schema_requires_confidence():
+    """confidence 是 spec §6 的必填字段:模型漏输出应解析失败 → 其他/0.0,
+    不能被 schema 默认值静默补成合规值。"""
+    with pytest.raises(ValidationError):
+        intent._Intent(intent="物流")
 
 
 class _FakeModel:

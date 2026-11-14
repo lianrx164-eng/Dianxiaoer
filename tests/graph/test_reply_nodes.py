@@ -8,9 +8,11 @@ from app.graph import nodes
 async def test_script_reply_fixed_no_actions():
     from app.core.prompts import CHITCHAT_REPLY_TEXT
 
-    out = await nodes.script_reply({"intent": "闲聊", "messages": [HumanMessage("你好")]})
+    out = await nodes.script_reply({"intent": "闲聊", "messages": [HumanMessage("你好")],
+                                    "trace": {"route": "fallback_script"}})
     assert out["answer"] == CHITCHAT_REPLY_TEXT
     assert out["trace"]["route"] == "fallback_script"
+    assert out["trace"]["handler"] == "script"
     assert not out.get("suggested_actions")
 
 

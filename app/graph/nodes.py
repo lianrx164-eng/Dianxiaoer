@@ -59,11 +59,16 @@ def _history_text(state, max_messages: int = 6) -> str:
     return "\n".join(lines)
 
 
+def _in_refund_flow(state) -> bool:
+    """退款子流程判定:证据注入、submit_refund 可见性与拦截都以此为准。"""
+    return state.get("route") == "refund_flow"
+
+
 async def script_reply(state) -> dict:
     """闲聊/其他 兜底话术(零模型):按 intent 分文案——闲聊把话题引回产品,其他请用户说具体些。
     分流后立即命中、不进 Agent。(与知识路证据弱的 fallback_reply 是两码事,勿混。)"""
     text = SCRIPT_REPLY_OTHER if state.get("intent") == "其他" else CHITCHAT_REPLY_TEXT
-    return {"answer": text, "trace": trace_of(state, route="fallback_script")}
+    return {"answer": text, "trace": trace_of(state, handler="script")}
 
 
 async def complaint_reply(state) -> dict:
@@ -74,7 +79,7 @@ async def complaint_reply(state) -> dict:
          "draft": {"description": _user_text(state), "ticket_type": "投诉"}},
     ]
     return {"answer": COMPLAINT_REPLY, "suggested_actions": actions,
-            "trace": trace_of(state, route="complaint")}
+            "trace": trace_of(state, handler="complaint")}
 
 
 async def fallback_reply(state) -> dict:
@@ -88,7 +93,7 @@ async def fallback_reply(state) -> dict:
     await repository.insert_low_confidence(
         state.get("conversation_id"), _user_text(state), source, reason)
     return {"answer": FALLBACK_REPLY,
-            "trace": trace_of(state, route="fallback")}
+            "trace": trace_of(state, handler="fallback")}
 
 
 async def cap_reply(state) -> dict:
@@ -101,7 +106,7 @@ async def cap_reply(state) -> dict:
         for tc in getattr(last, "tool_calls", [])
     ]
     return {"answer": FALLBACK_REPLY, "messages": aborted,
-            "trace": trace_of(state, route="cap", cap=True)}
+            "trace": trace_of(state, handler="cap", cap=True)}
 
 
 async def coref(state) -> dict:
@@ -180,15 +185,8 @@ async def retrieve_policy(state) -> dict:
                 merged[h["id"]] = h
     ranked = sorted(merged.values(), key=lambda h: h["rerank_score"], reverse=True)
     arranged = retrieval.arrange_head_tail(ranked)
-    citations = [
-        {"n": i + 1, "id": h["id"], "chunk_id": h["id"],
-         "section_path": h["section_path"], "question": h["question"],
-         "answer": h["answer"], "content_type": h["content_type"]}
-        for i, h in enumerate(arranged)
-    ]
-    evidence = "\n".join(f"[{c['n']}] {c['question']}: {c['answer']}"
-                         for c in citations)
-    return {"evidence": evidence, "citations": citations,
+    citations, evidence_text = evidence.build_citations(arranged)
+    return {"evidence": evidence_text, "citations": citations,
             "trace": trace_of(state, retrieve_policy={
                 "queries": queries, "hits": len(ranked)})}
 
@@ -226,7 +224,7 @@ def _agent_messages(state) -> list:
     sys = AGENT_SYSTEM
     if state.get("evidence"):
         sys = sys + _KNOWLEDGE_EVIDENCE_HINT + state["evidence"]
-    if state.get("route") == "refund_flow":
+    if _in_refund_flow(state):
         sys = (sys + REFUND_JUDGE_HINT
                + json.dumps(state.get("order_data") or {}, ensure_ascii=False))
     history = trim_history(state.get("messages", []), max_tokens=settings.token_budget)
@@ -237,7 +235,7 @@ def _tools_for(state) -> list:
     """submit_refund 只在退款子流程里可见;其他路不让模型看见退款工具,
     避免误分类时产出没有订单号、没有政策依据的退款表单。"""
     tools = get_all_tools()
-    if state.get("route") == "refund_flow":
+    if _in_refund_flow(state):
         return tools
     return [t for t in tools if t.name != "submit_refund"]
 
@@ -279,7 +277,7 @@ async def agent_tools(state) -> dict:
         elif tc["name"] == "submit_refund":
             args = tc.get("args") or {}
             order_id = args.get("order_id") or state.get("order_id", "")
-            if state.get("route") != "refund_flow" or not order_id:
+            if not _in_refund_flow(state) or not order_id:
                 tool_msgs.append(ToolMessage(
                     content=("当前不在退款流程或缺少订单号,不能发起退款申请;"
                              "请按当前问题继续作答,不要声称已提交。"),

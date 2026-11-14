@@ -1,4 +1,3 @@
-import json
 import logging
 from collections.abc import AsyncIterator
 
@@ -7,6 +6,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.api import errors
+from app.api.sse import event_frames, sse_error
 from app.db import repository
 from app.graph import runtime
 from app.schemas.actions import (
@@ -19,10 +19,6 @@ from app.schemas.actions import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-
-def _sse(payload: dict) -> str:
-    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
 @router.post("/api/actions/create-ticket", response_model=CreateTicketResponse)
@@ -54,28 +50,15 @@ async def resume_action(req: ResumeRequest):
     """订单选择器点选后续跑暂停的退款子流程(SSE,事件与 /api/chat 同构)。"""
     async def event_stream() -> AsyncIterator[str]:
         try:
-            async for ev in runtime.stream_resume(req.conversation_id, req.order_id):
-                if ev["type"] == "tool":
-                    yield _sse({"event": "tool", "name": ev["name"]})
-                elif ev["type"] == "delta":
-                    yield _sse({"delta": ev["text"]})
-                elif ev["type"] == "citations":
-                    yield _sse({"event": "citations", "items": ev["items"]})
-                elif ev["type"] == "actions":
-                    yield _sse({"event": "actions", "items": ev["items"]})
-                elif ev["type"] == "interrupt":
-                    yield _sse({"event": "interrupt",
-                                "conversation_id": ev["conversation_id"],
-                                "kind": ev["kind"], "orders": ev["orders"]})
-                elif ev["type"] == "done":
-                    yield _sse({"event": "done",
-                                "conversation_id": ev["conversation_id"]})
+            async for frame in event_frames(
+                    runtime.stream_resume(req.conversation_id, req.order_id)):
+                yield frame
         except Exception as exc:  # noqa: BLE001 - 流已发 200,错误只能走帧
             kind = errors.classify(exc)
             if kind != errors.NOT_FOUND:
                 logger.exception("续跑失败 conv=%s", req.conversation_id)
-            yield "event: error\n"
-            yield _sse({"message": errors.ERROR_MESSAGES[kind]})
+            for f in sse_error(errors.ERROR_MESSAGES[kind]):
+                yield f
             return
         yield "data: [DONE]\n\n"
 

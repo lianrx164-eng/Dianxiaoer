@@ -31,7 +31,7 @@ ch05 骨架把分流器前段留成占位:`coref` 原样透传、`classify_inten
 | A7 | 未覆盖「暂停中用户又发新消息」 | 实测 langgraph 1.2.21 会接受新输入并再次触发同一中断,新消息不处理 | runtime 显式检测未决中断:重新吐 `interrupt` 事件(带 `conversation_id`),不启动新一轮;见 D9 |
 | A8 | `tickets` 枚举只改模型 + ALTER | 测试库由 `sql/ch02-ddl.sql` 建表 | 同步改 `ch02-ddl.sql` 的 ENUM,另加 `sql/ch06-ticket-type.sql` 给存量库 |
 | A9 | `order_id` 取模型传入值 | 模型可能漏传/传错 | 拦截 `submit_refund` 时优先用工具参数,缺失回落 `state["order_id"]` |
-| A10 | 意图解析失败回「其他」 | 与 ch05「未知归 business」哲学不同 | 按本章 spec 回「其他」(最保守),记录为 D12 |
+| A10 | 意图解析失败回「其他」 | 与 ch05「未知归 business」哲学不同 | 按本章 spec 回「其他」(最保守),记录为 D11 |
 
 ## 3. 数据流与图骨架
 
@@ -86,7 +86,7 @@ START
 ## 6. 意图识别四件套(`intent.classify` 重写)
 
 1. **选择题**:八类 + 每类边界说明。
-2. **强制 JSON**:`_Intent{intent: Literal[8类], confidence: 0-1}`;解析失败/越界 → 「其他」+ confidence 0.0,记 warning。
+2. **强制 JSON**:`_Intent{intent: Literal[8类], confidence: 0-1}`;`confidence` 必填、不设 schema 默认值——模型漏输出即视为解析失败 → 「其他」+ 0.0,记 warning。越界同样归「其他」。
 3. **few-shot**:边界样例(「这个还能退吗」→退款退货;「退货运费谁出」→商品咨询;「猫爬架坏了能保修吗」→售后;怪问题→其他)。
 4. **兜底类「其他」**:拿不准归它,不硬塞业务意图。
 
@@ -184,9 +184,10 @@ route = refund_flow
 - **D7** 五出口按 README;闲聊 + 其他共用 `fallback_script`,按 intent 分文案;闲聊文案沿用 ch05。
 - **D8** 沿用 ch05:置信度闸在 Agent 之前;节点名 `coref/forced_rag/agent_llm` 不变;trace 键 `coref/forced_rag` 保留。
 - **D9** 暂停中收到新消息:runtime 重新吐 `interrupt`(带 conversation_id),不启动新一轮、不落 MySQL;用户应点选订单或开新对话。理由:最小、无状态污染;取消哨兵方案留待后续。
-- **D10** `submit_refund` 的 `order_id` 以工具参数优先、缺失回落 `state["order_id"]`,避免前端表单空单号。
+- **D10** `submit_refund` 只在 `refund_flow` 可见(非退款路不 bind)且被 `agent_tools` 拦截;`order_id` 以工具参数优先、缺失回落 `state["order_id"]`;两者都没有则在拦截处拒绝该调用,不产出空单号表单。
 - **D11** 意图解析失败归「其他」(最保守),confidence=0,记 warning。
-- **D12** `orders_snapshot` 抽取时正则用 `(?<!\d)(\d{4,})(?!\d)`(中文与数字之间无 `\b` 边界)。
+- **D12** 订单号候选只认两种:紧邻订单线索(订单/单号/尾号/order,且线索与数字之间没有别的数字)或属于该用户名下订单;手机号/金额/年份不认,交订单选择器。正则 `(?<!\d)(\d{4,})(?!\d)`(中文与数字之间无 `\b` 边界)。
+- **D13** 回复节点(`complaint_reply`/`fallback_reply`/`cap_reply`/`script_reply`)不覆盖 `trace.route`;节点身份写 `trace.handler`。`trace.route` 始终是 `classify_intent` 写下的五出口值,供日志与验收读取。
 
 ## 14. 风险与回退
 

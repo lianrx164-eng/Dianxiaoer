@@ -285,10 +285,37 @@ def test_history_text_skips_tool_messages():
 async def test_script_reply_by_intent():
     from app.core.prompts import CHITCHAT_REPLY_TEXT, SCRIPT_REPLY_OTHER
 
-    chit = await nodes.script_reply({"intent": "闲聊"})
+    chit = await nodes.script_reply({"intent": "闲聊",
+                                     "trace": {"route": "fallback_script"}})
     assert chit["answer"] == CHITCHAT_REPLY_TEXT
-    assert chit["trace"]["route"] == "fallback_script"
+    assert chit["trace"]["route"] == "fallback_script"   # 不覆盖分流出口
+    assert chit["trace"]["handler"] == "script"
     assert not chit.get("suggested_actions")
 
     other = await nodes.script_reply({"intent": "其他"})
     assert other["answer"] == SCRIPT_REPLY_OTHER
+
+
+@pytest.mark.asyncio
+async def test_reply_nodes_preserve_outlet_route(monkeypatch):
+    async def fake_insert(*a, **k):
+        return 1
+
+    monkeypatch.setattr(nodes.repository, "insert_low_confidence", fake_insert)
+
+    out = await nodes.complaint_reply(
+        {"messages": [HumanMessage("我要投诉")], "trace": {"route": "escalate"}})
+    assert out["trace"]["route"] == "escalate"
+    assert out["trace"]["handler"] == "complaint"
+
+    out = await nodes.fallback_reply({
+        "messages": [HumanMessage("q")],
+        "trace": {"route": "knowledge", "gate": "retrieval_low_conf"}})
+    assert out["trace"]["route"] == "knowledge"
+    assert out["trace"]["handler"] == "fallback"
+
+    ai = AIMessage("", tool_calls=[{"name": "query_order", "args": {}, "id": "c1"}])
+    out = await nodes.cap_reply({"messages": [HumanMessage("查订单"), ai],
+                                 "trace": {"route": "business"}})
+    assert out["trace"]["route"] == "business"
+    assert out["trace"]["handler"] == "cap"
