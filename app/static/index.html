@@ -353,6 +353,10 @@
   .order-card .oid { color: #b34700; }
   .order-card .product { margin-top: 4px; font-size: 14px; }
   .order-card .status-line { margin-top: 2px; font-size: 12px; color: #6b5d4a; }
+  .ticket-card { cursor: default; }
+  .ticket-card:hover { background: #fff8ec; }
+  .ticket-card:active { transform: none; box-shadow: 3px 3px 0 #1c1c1c; }
+  .ticket-card .ticket-actions { display: flex; gap: 8px; margin-top: 10px; }
 
   .modal-mask {
     position: fixed; inset: 0; z-index: 60;
@@ -990,7 +994,7 @@
       card.append(head, product, status);
       card.addEventListener('click', async () => {
         for (const c of wrap.querySelectorAll('.order-card')) c.disabled = true;
-        const ok = await resumeWithOrder(o.order_id);
+        const ok = await resumeWith({ order_id: o.order_id });
         // 续跑失败时恢复可点,用户能重试;否则卡片会永久禁用、错误提示又指不出重试入口
         if (!ok) for (const c of wrap.querySelectorAll('.order-card')) c.disabled = false;
       });
@@ -1162,7 +1166,72 @@
     return interrupt;
   }
 
-  async function resumeWithOrder(orderId) {
+  // 工单预览卡:确认提交 / 取消;任一按钮点击后禁卡并续跑
+  function renderTicketConfirm(bubble, preview) {
+    const wrap = document.createElement('div');
+    wrap.className = 'order-cards';
+    const card = document.createElement('div');
+    card.className = 'order-card ticket-card';
+
+    const head = document.createElement('div');
+    head.className = 'order-head';
+    const title = document.createElement('span');
+    title.textContent = '工单预览';
+    const type = document.createElement('span');
+    type.className = 'oid';
+    type.textContent = preview.ticket_type || '咨询';
+    head.append(title, type);
+
+    const desc = document.createElement('div');
+    desc.className = 'product';
+    desc.textContent = preview.description || '';
+
+    const bar = document.createElement('div');
+    bar.className = 'ticket-actions';
+    const ok = document.createElement('button');
+    ok.type = 'button';
+    ok.className = 'action-btn';
+    ok.textContent = '确认提交';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'action-btn';
+    cancel.textContent = '取消';
+
+    const choose = async (confirmed) => {
+      ok.disabled = true;
+      cancel.disabled = true;
+      const echo = document.createElement('div');
+      echo.className = 'status-line';
+      echo.textContent = confirmed ? '已确认提交,正在创建工单…' : '已取消本次建单';
+      card.append(echo);
+      const done = await resumeWith({ confirmed });
+      if (!done) {
+        ok.disabled = false;
+        cancel.disabled = false;
+        echo.remove();
+      }
+    };
+    ok.addEventListener('click', () => choose(true));
+    cancel.addEventListener('click', () => choose(false));
+    bar.append(ok, cancel);
+    card.append(head, desc, bar);
+    wrap.append(card);
+    bubble.append(wrap);
+    scrollToBottom();
+  }
+
+  // interrupt 按 kind 分发:订单选择器 / 工单预览
+  function applyInterrupt(bubble, data, textEl) {
+    if (data.kind === 'confirm_ticket') {
+      if (textEl) textEl.textContent = '请确认以下工单信息:';
+      renderTicketConfirm(bubble, data.preview || {});
+    } else {
+      if (textEl) textEl.textContent = '请选择要退款的订单:';
+      renderOrders(bubble, data);
+    }
+  }
+
+  async function resumeWith(payload) {
     if (!conversationId) {
       addNotice('会话已失效,请点击「+ 新对话」重试');
       return false;
@@ -1176,19 +1245,16 @@
       const res = await fetch('/api/actions/resume', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conversation_id: Number(conversationId), order_id: orderId }),
+        body: JSON.stringify({ conversation_id: Number(conversationId), ...payload }),
       });
       if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
       const interrupt = await readSse(res, ui);
       if (ui.upstreamError) throw new Error(ui.upstreamError);
       if (interrupt) {
-        if (!ui.rawText) {
-          ui.started = true;
-          textEl.innerHTML = '';
-          textEl.textContent = '请选择要退款的订单:';
-        }
         textEl.classList.remove('streaming');
-        renderOrders(bubble, interrupt);
+        textEl.innerHTML = '';
+        ui.started = false;
+        applyInterrupt(bubble, interrupt, textEl);
         return true;
       }
       if (!ui.rawText) textEl.textContent = '(小喵这次没有回复内容,请再试一次)';
@@ -1234,14 +1300,13 @@
           if (ui.upstreamError) throw new Error(ui.upstreamError);
 
           if (interrupt) {
-            // 图暂停在订单选择器:渲染可点选卡片,点选后走 /api/actions/resume 续流
+            // 图暂停在订单选择器 / 工单预览:渲染对应卡片,操作后走 /api/actions/resume 续流
+            textEl.classList.remove('streaming');
             if (!ui.rawText) {
               ui.started = true;
               textEl.innerHTML = '';
-              textEl.textContent = '请选择要退款的订单:';
             }
-            textEl.classList.remove('streaming');
-            renderOrders(bubble, interrupt);
+            applyInterrupt(bubble, interrupt, ui.rawText ? null : textEl);
             return;
           }
 
