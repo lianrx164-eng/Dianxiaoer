@@ -1,7 +1,7 @@
 """接口层错误映射:异常 → 错误类别 → 文案/状态码,chat(SSE)与 agent(JSON)共用。"""
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.core.agent import ConversationNotFound
+from app.graph.runtime import ConversationNotFound
 
 NOT_FOUND = "not_found"
 DB = "db"
