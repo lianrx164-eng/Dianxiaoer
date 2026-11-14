@@ -38,6 +38,8 @@ if not any(isinstance(h, logging.FileHandler) for h in _app_log.handlers):
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    from app.tools import registry as tool_registry
+    tool_registry.scan_builtin()   # ch08:内置工具服务启动时登记
     await runtime.init_graph()
     yield
     await runtime.close_graph()

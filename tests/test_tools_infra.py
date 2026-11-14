@@ -3,10 +3,10 @@ import asyncio
 from app.tools import infra, registry
 
 
-def test_registry_has_six_tools():
+def test_registry_has_five_tools():
     names = {t.name for t in registry.get_all_tools()}
-    assert names == {"query_order", "query_product", "query_logistics", "query_faq",
-                     "create_ticket", "submit_refund"}
+    assert names == {"query_order", "query_product", "query_faq",
+                     "create_ticket", "submit_refund"}   # ch08:物流由 MCP 接管
 
 
 async def test_execute_unknown_tool_returns_error_run():

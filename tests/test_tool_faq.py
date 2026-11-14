@@ -1,4 +1,4 @@
-from app.tools.business import query_faq
+from app.tools.builtin.faq import query_faq
 
 
 async def test_query_faq_passes_keyword_through(monkeypatch):

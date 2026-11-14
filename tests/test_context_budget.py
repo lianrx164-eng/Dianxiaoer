@@ -20,20 +20,21 @@ def test_estimate_text_tokens_uses_chars_per_token():
     assert cb.estimate_text_tokens("a" * 2161, s) == 1081
 
 
-def test_demo_budget_matches_acceptance_numbers():
+def test_budget_with_demo_config():
+    """演示配置下的预算(ch08:工具清单变化后数值已重测,不再是 ch07 验收数字)。"""
     b = cb.compute_budget(_settings(
         model_context_window=18000, max_output_tokens=2000,
         max_user_input_tokens=2000, max_agent_steps=3,
         tool_result_max_tokens=1200, rerank_top_k=5))
     assert (b.window, b.fixed, b.react_peak, b.history, b.layer1, b.layer2) == (
-        18000, 8750, 3600, 5650, 3954, 1695)
+        18000, 8597, 3600, 5803, 4061, 1741)
 
 
-def test_only_window_set_yields_50_and_self_check_warns(caplog):
+def test_only_window_set_yields_small_history_and_self_check_warns(caplog):
     s = _settings(model_context_window=18000)      # 步数/rerank 保持默认 6/10
     b = cb.compute_budget(s)
     assert (b.fixed, b.react_peak, b.history, b.layer1, b.layer2) == (
-        10750, 7200, 50, 34, 15)
+        10597, 7200, 203, 141, 61)
     with caplog.at_level(logging.ERROR, logger="app.core.context_budget"):
         cb.self_check(s)
     assert "上下文预算不足" in caplog.text
@@ -42,7 +43,7 @@ def test_only_window_set_yields_50_and_self_check_warns(caplog):
 def test_default_budget():
     b = cb.compute_budget(_settings())
     assert (b.window, b.fixed, b.react_peak, b.history, b.layer1, b.layer2) == (
-        64000, 10750, 7200, 30000, 20999, 9000)
+        64000, 10597, 7200, 30000, 20999, 9000)
 
 
 def test_budget_constants_match_prompt_and_tools():

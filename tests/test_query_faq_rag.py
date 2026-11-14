@@ -1,6 +1,6 @@
 import pytest
 
-from app.tools import business
+from app.tools.builtin.faq import query_faq
 
 
 def _hit(i, score=0.9):
@@ -30,7 +30,7 @@ async def test_query_faq_sufficient(monkeypatch):
     monkeypatch.setattr("app.core.retrieval.search_knowledge", fake_search)
     monkeypatch.setattr("app.core.selfcheck.check_sufficient", fake_check)
 
-    out = await business.query_faq.ainvoke({"keyword": "邮费多少"})
+    out = await query_faq.ainvoke({"keyword": "邮费多少"})
     assert out["sufficient"] is True
     assert out["citations"][0]["n"] == 1 and out["citations"][0]["section_path"]
     assert "[1]" in out["evidence"]
@@ -45,7 +45,7 @@ async def test_query_faq_retrieval_low_conf(monkeypatch):
         return []
 
     monkeypatch.setattr("app.core.retrieval.search_knowledge", fake_search)
-    out = await business.query_faq.ainvoke({"keyword": "火星车怎么买"})
+    out = await query_faq.ainvoke({"keyword": "火星车怎么买"})
     assert out["sufficient"] is False and out["source"] == "retrieval_low_conf"
 
 
@@ -61,7 +61,7 @@ async def test_query_faq_self_check_fail(monkeypatch):
 
     monkeypatch.setattr("app.core.retrieval.search_knowledge", fake_search)
     monkeypatch.setattr("app.core.selfcheck.check_sufficient", fake_check)
-    out = await business.query_faq.ainvoke({"keyword": "Pro型号能自动铲屎吗"})
+    out = await query_faq.ainvoke({"keyword": "Pro型号能自动铲屎吗"})
     assert out["sufficient"] is False and out["source"] == "self_check"
     assert "型号" in out["reason"]
 
@@ -77,7 +77,7 @@ async def test_query_faq_expands_bm25_only(monkeypatch):
         return []
 
     monkeypatch.setattr("app.core.retrieval.search_knowledge", fake_search)
-    await business.query_faq.ainvoke({"keyword": "邮费多少"})
+    await query_faq.ainvoke({"keyword": "邮费多少"})
     assert seen["query"] == "标准问法"
     assert "运费" in seen["bm25_query"] and "邮费" in seen["bm25_query"]
 
@@ -96,6 +96,6 @@ async def test_query_faq_retries_without_bad_category(monkeypatch):
 
     monkeypatch.setattr("app.core.retrieval.search_knowledge", fake_search)
     monkeypatch.setattr("app.core.selfcheck.check_sufficient", fake_check)
-    out = await business.query_faq.ainvoke({"keyword": "运费", "category": "运费"})
+    out = await query_faq.ainvoke({"keyword": "运费", "category": "运费"})
     assert calls == ["运费", None]
     assert out["sufficient"] is True

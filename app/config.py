@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     tool_result_max_tokens: int = 1200
     chars_per_token: float = 2.0
     system_prompt_tokens: int = 389       # AGENT_SYSTEM 777 字 @ 2.0
-    tool_schema_tokens: int = 1081        # 6 个工具 schema 2161 字 @ 2.0
+    tool_schema_tokens: int = 928         # 5 个内置工具 schema 1856 字 @ 2.0
     system_overhead_tokens: int = 30
     evidence_chunk_tokens: int = 400
     summary_budget_tokens: int = 750
