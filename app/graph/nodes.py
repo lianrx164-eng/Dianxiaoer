@@ -33,6 +33,20 @@ def _user_text(state) -> str:
     return ""
 
 
+def _history_text(state, max_messages: int = 6) -> str:
+    """把本轮之前的 human/ai 消息压成紧凑文本,供 coref / 意图识别读上下文。
+    不含本轮最后一条 human(那是待处理的话本身)。"""
+    msgs = state.get("messages", [])
+    prior = msgs[:-1] if msgs else []
+    lines = []
+    for m in prior[-max_messages:]:
+        role = "用户" if isinstance(m, HumanMessage) else "客服"
+        text = m.content if isinstance(m.content, str) else ""
+        if text:
+            lines.append(f"{role}:{text}")
+    return "\n".join(lines)
+
+
 async def chitchat_reply(state) -> dict:
     """闲聊:固定话术,零模型调用。"""
     return {"answer": CHITCHAT_REPLY,
@@ -83,11 +97,16 @@ async def coref(state) -> dict:
 
 
 async def classify_intent(state) -> dict:
-    """意图识别:单标签七类,并落四出口供日志与下游使用。"""
-    intent = await intent_mod.classify(_user_text(state))
+    """意图四件套:八类 + confidence + 「其他」兜底。吃 resolved_query(空则回落原话)+
+    最近历史判当前意图(应对物流→退款→物流漂移)。把归属出口 route 落进 State(供
+    _agent_messages 判注入、log 留痕;route_by_intent 条件边按同一 INTENT_TO_ROUTE 分流)。"""
+    query = state.get("resolved_query") or _user_text(state)
+    r = await intent_mod.classify(query, _history_text(state))
+    intent, conf = r["intent"], r["confidence"]
     route = INTENT_TO_ROUTE.get(intent, "business")
-    return {"intent": intent, "route": route,
-            "trace": trace_of(state, intent=intent, route=route)}
+    return {"intent": intent, "intent_confidence": conf, "route": route,
+            "trace": trace_of(state, intent=intent,
+                              intent_confidence=conf, route=route)}
 
 
 async def forced_rag(state) -> dict:

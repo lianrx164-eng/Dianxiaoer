@@ -53,9 +53,11 @@ async def test_forced_rag_weak_when_selfcheck_rejects(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_classify_intent_writes_state(monkeypatch):
-    monkeypatch.setattr(nodes.intent_mod, "classify", _aval("物流"))
+    monkeypatch.setattr(nodes.intent_mod, "classify",
+                        _aval({"intent": "物流", "confidence": 0.9}))
     out = await nodes.classify_intent({"messages": [HumanMessage("快递到哪了")]})
     assert out["intent"] == "物流"
+    assert out["intent_confidence"] == 0.9
     assert out["route"] == "business"
     assert out["trace"]["intent"] == "物流"
 
