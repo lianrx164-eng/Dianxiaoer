@@ -63,6 +63,21 @@ async def test_classify_intent_writes_state(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_forced_rag_uses_resolved_query(monkeypatch):
+    seen = {}
+
+    async def fake_gather(q, category=None):
+        seen["q"] = q
+        return {"sufficient": False, "source": "retrieval_low_conf",
+                "reason": "", "top": 0.0}
+
+    monkeypatch.setattr(nodes.evidence, "gather_evidence", fake_gather)
+    await nodes.forced_rag({"messages": [HumanMessage("它呢")],
+                            "resolved_query": "订单1001到哪了"})
+    assert seen["q"] == "订单1001到哪了"
+
+
+@pytest.mark.asyncio
 async def test_confidence_check_traces_decision():
     assert (await nodes.confidence_check({"evidence_strong": True}))["trace"]["confidence"] == "strong"
     assert (await nodes.confidence_check({"evidence_strong": False}))["trace"]["confidence"] == "weak"

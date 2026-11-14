@@ -3,6 +3,7 @@ import logging
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.config import settings
+from app.core import coref as coref_mod
 from app.core import evidence
 from app.core import intent as intent_mod
 from app.core.llm import get_chat_model
@@ -92,8 +93,12 @@ async def cap_reply(state) -> dict:
 
 
 async def coref(state) -> dict:
-    """指代消解:本章最简,原样透传(正式版留 ch06)。"""
-    return {"trace": trace_of(state, coref="passthrough")}
+    """指代消解 + Query 改写(合一):吃最近几轮历史把半截话补成完整问句;已完整则透传。
+    写 resolved_query,供 classify_intent / forced_rag / retrieve_policy 共用。"""
+    query = _user_text(state)
+    resolved = await coref_mod.resolve(query, _history_text(state))
+    mode = "rewrite" if resolved != query else "passthrough"
+    return {"resolved_query": resolved, "trace": trace_of(state, coref=mode)}
 
 
 async def classify_intent(state) -> dict:
@@ -110,8 +115,10 @@ async def classify_intent(state) -> dict:
 
 
 async def forced_rag(state) -> dict:
-    """知识类强制检索:复用统一证据管线(检索分闸 + 自评闸),结果落进 State。"""
-    r = await evidence.gather_evidence(_user_text(state))
+    """知识类强制检索:复用统一证据管线(检索分闸 + 自评闸),结果落进 State。
+    用 resolved_query 检索(指代已补全,避免拿半截话去查)。"""
+    r = await evidence.gather_evidence(
+        state.get("resolved_query") or _user_text(state))
     if not r["sufficient"]:
         extra = {"self_check": r["reason"]} if r["source"] == "self_check" else {}
         return {"evidence_strong": False,
