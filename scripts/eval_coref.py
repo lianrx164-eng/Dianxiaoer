@@ -11,6 +11,8 @@ CASES = [
     ("用户:订单1001买的猫粮\n客服:已发货", "它到哪了", "rewrite", "1001"),
     ("", "蓝牙耳机的保修期是多久", "passthrough", None),
     ("", "退货运费谁承担", "passthrough", None),
+    ("", "我要退款", "passthrough", None),
+    ("", "我要退货", "passthrough", None),
 ]
 
 
