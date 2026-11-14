@@ -8,6 +8,7 @@ from langgraph.types import Command
 
 from app.config import settings
 from app.core import context_budget, memory, summarizer
+from app.core.observability import attach_observability
 from app.db import repository
 from app.graph.build import build_graph
 
@@ -37,7 +38,7 @@ async def init_graph() -> None:
     _cm = AsyncSqliteSaver.from_conn_string(settings.checkpointer_db_path)
     _checkpointer = await _cm.__aenter__()
     await _checkpointer.setup()
-    _graph = build_graph(checkpointer=_checkpointer)
+    _graph = attach_observability(build_graph(checkpointer=_checkpointer))
     budget = context_budget.self_check()
     logger.info("上下文预算 window=%s fixed=%s peak=%s history=%s layer1=%s layer2=%s",
                 budget.window, budget.fixed, budget.react_peak,
@@ -168,6 +169,13 @@ def _turn_result(cid: int, final: dict, prev_messages: list) -> dict:
             "interrupt": _interrupt_payload(final.get("__interrupt__"))}
 
 
+def _trace_config(cid: int) -> dict:
+    """运行配置:Langfuse 靠 metadata 里的 session id 把同会话多轮串成一组;
+    未启用观测时这段 metadata 对 LangGraph 无副作用。"""
+    return {"configurable": {"thread_id": str(cid)},
+            "metadata": {"langfuse_session_id": str(cid)}}
+
+
 async def run_turn(user_id, message, conversation_id) -> dict:
     """非流式:ainvoke → 返回终态(供 /api/agent、eval)。
 
@@ -176,7 +184,7 @@ async def run_turn(user_id, message, conversation_id) -> dict:
     上轮停在订单选择器时,不启动新一轮(否则新消息不处理、只再次触发中断),
     直接把未决中断带回去,由前端点选续跑。"""
     cid = await _ensure_conversation(user_id, conversation_id)
-    config = {"configurable": {"thread_id": str(cid)}}
+    config = _trace_config(cid)
     graph = get_graph()
     prev = await graph.aget_state(config)
     pending = _pending_payload(prev)
@@ -194,7 +202,7 @@ async def run_turn(user_id, message, conversation_id) -> dict:
 
 async def _stream_events(cid: int, stream_source) -> AsyncIterator[dict]:
     """把 astream 多模式映射成事件 dict;遇中断吐 interrupt 并结束本次流。"""
-    config = {"configurable": {"thread_id": str(cid)}}
+    config = _trace_config(cid)
     actions: list = []
     seen_actions: set = set()
     async for mode, chunk in get_graph().astream(
@@ -231,7 +239,7 @@ async def _stream_events(cid: int, stream_source) -> AsyncIterator[dict]:
 async def stream_turn(user_id, message, conversation_id) -> AsyncIterator[dict]:
     """流式:astream 多模式 → 映射成事件 dict(供 /api/chat 转 SSE)。"""
     cid = await _ensure_conversation(user_id, conversation_id)
-    config = {"configurable": {"thread_id": str(cid)}}
+    config = _trace_config(cid)
     graph = get_graph()
     prev = await graph.aget_state(config)
     pending = _pending_payload(prev)
@@ -260,7 +268,7 @@ async def resume_turn(conversation_id: int, resume_value) -> dict:
     """非流式续跑(供 eval/脚本);SSE 入口用 stream_resume。"""
     if await repository.get_conversation(conversation_id) is None:
         raise ConversationNotFound(conversation_id)
-    config = {"configurable": {"thread_id": str(conversation_id)}}
+    config = _trace_config(conversation_id)
     graph = get_graph()
     prev = await graph.aget_state(config)
     prev_messages = (prev.values or {}).get("messages", []) if prev else []

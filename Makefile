@@ -1,4 +1,4 @@
-.PHONY: dev test eval seed eval-agent kb-preview kb-build kb-vectorize kb-mine kb-reset eval-retrieval seed-conv eval-mining smoke-rag eval-rag eval-check judge-check eval-rewrite smoke-graph eval-intent eval-ch05 smoke-interrupt eval-coref eval-expand eval-ch06 eval-ch07 smoke-ch07 smoke-ch07-demo mcp-up mcp-down
+.PHONY: dev test eval seed eval-agent kb-preview kb-build kb-vectorize kb-mine kb-reset eval-retrieval seed-conv eval-mining smoke-rag eval-rag eval-check judge-check eval-rewrite smoke-graph eval-intent eval-ch05 smoke-interrupt eval-coref eval-expand eval-ch06 eval-ch07 smoke-ch07 smoke-ch07-demo mcp-up mcp-down langfuse-up langfuse-down
 
 dev:
 	./scripts/dev.sh
@@ -114,3 +114,15 @@ mcp-down:
 	-@kill `cat data/mcp-logistics.pid 2>/dev/null` 2>/dev/null; rm -f data/mcp-logistics.pid
 	-@kill `cat data/mcp-aftersales.pid 2>/dev/null` 2>/dev/null; rm -f data/mcp-aftersales.pid
 	@echo "MCP Servers 已停"
+
+# ch09: Langfuse 自部署观测栈(web:3000 + worker + postgres + clickhouse + redis + minio)
+langfuse-up:
+	docker compose -f docker-compose.langfuse.yml up -d
+	@echo "Langfuse 起中: http://localhost:3000 (admin@mewhelp.local / mewhelp123)"
+	@echo "首次就绪约 2-3 分钟;key 已 headless 预置,.env 需有:"
+	@echo "  LANGFUSE_PUBLIC_KEY=pk-lf-mewhelp-local"
+	@echo "  LANGFUSE_SECRET_KEY=sk-lf-mewhelp-local"
+	@echo "  LANGFUSE_BASE_URL=http://localhost:3000"
+
+langfuse-down:
+	docker compose -f docker-compose.langfuse.yml down
