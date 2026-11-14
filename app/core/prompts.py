@@ -199,6 +199,22 @@ COREF_REWRITE_PROMPT = ChatPromptTemplate.from_messages(
      ("human", "最近对话(可空):\n{history}\n\n用户这句话:{query}\n\n补全后的完整问题:")]
 )
 
+EXPAND_QUERIES_SYSTEM = """## 角色
+你是电商客服的查询优化助手,把用户问题泛化成多条检索友好的中文查询,用于知识库检索。
+
+## 改写规则
+1. 出现产品名、型号、平台这类关键实体时,改写要保持一致。
+2. 不要引入原问题里没有的型号、参数、数值。
+3. 每条查询尽量短、含关键词,彼此侧重点不同。
+
+## 输出要求
+严格 3 条,必须使用以下 JSON 格式返回,不得包含任何其他文本:
+{{"queries": ["蓝牙耳机退货政策", "蓝牙耳机无理由退换货条件", "耳机退货时间限制"]}}"""
+
+EXPAND_QUERIES_PROMPT = ChatPromptTemplate.from_messages(
+    [("system", EXPAND_QUERIES_SYSTEM), ("human", "用户问题:{query}")]
+)
+
 CHITCHAT_REPLY_TEXT = "你好呀~我是喵喵优选的智能客服小喵。商品、订单、物流、售后都可以问我哦,有什么能帮您的?"
 COMPLAINT_REPLY_TEXT = "非常抱歉给您带来了不好的体验,我理解您的心情。您可以选择转接人工客服,或让我为您登记一张工单跟进处理。"
 FALLBACK_REPLY_TEXT = "抱歉,这个问题我暂时没有查到确切信息,不敢乱答。建议您联系人工客服进一步确认,以免给您错误的指引。"
