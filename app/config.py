@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     max_user_input_tokens: int = 2000
     tool_result_max_tokens: int = 1200
     chars_per_token: float = 2.0
-    system_prompt_tokens: int = 415       # AGENT_SYSTEM 830 字 @ 2.0(ch08 建单确认规则)
+    system_prompt_tokens: int = 466       # AGENT_SYSTEM 932 字 @ 2.0(ch08 建单确认规则)
     tool_schema_tokens: int = 928         # 5 个内置工具 schema 1856 字 @ 2.0
     mcp_tool_schema_tokens: int = 440     # 3 个 MCP 工具 schema 预留(2026-11-14 实测)
     system_overhead_tokens: int = 30

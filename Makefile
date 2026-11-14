@@ -87,6 +87,10 @@ eval-expand:
 eval-ch06:
 	PYTHONUTF8=1 uv run python -m scripts.eval_ch06
 
+# ch08 验收样例端到端(需 make dev + make mcp-up)
+eval-ch08:
+	PYTHONUTF8=1 uv run python -m scripts.eval_ch08
+
 # ch07 分段摘要 prompt 标注评估(需上游可用)
 eval-ch07:
 	PYTHONUTF8=1 uv run python -m scripts.eval_ch07

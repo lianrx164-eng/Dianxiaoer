@@ -230,6 +230,13 @@ _KNOWLEDGE_EVIDENCE_HINT = (
     "证据已给,不要再调用 query_faq;仍可按需调用订单/物流等工具)\n"
 )
 
+_TICKET_FOLLOWUP_HINT = (
+    "\n\n## 建单进行中(仅本轮)\n"
+    "用户上一轮明确要求建工单,这一轮是在补充问题。只要已能从对话概括问题描述,"
+    "就直接调用 create_ticket(description 用用户说的问题,ticket_type 按性质选),"
+    "不要再索要订单号、联系方式等非必填信息;确实仍缺问题描述时才追问。\n"
+)
+
 TURN_CTX_ID = "turn-ctx"
 
 
@@ -274,6 +281,8 @@ def _turn_context(state) -> str:
     if state.get("summary"):
         parts.append("\n\n## 早前对话摘要(更早轮次已压缩,其中事实可信)\n"
                      + state["summary"])
+    if (state.get("trace") or {}).get("ticket_followup"):
+        parts.append(_TICKET_FOLLOWUP_HINT)
     if state.get("evidence"):
         parts.append(_KNOWLEDGE_EVIDENCE_HINT + state["evidence"])
     if _in_refund_flow(state):
