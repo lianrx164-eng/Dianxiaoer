@@ -1,0 +1,85 @@
+[跳过] E46 检索失败:ConnectError
+[跳过] E50 检索失败:ConnectError
+[跳过] D11 检索失败:APIStatusError
+[跳过] D12 检索失败:APIStatusError
+[跳过] D13 检索失败:APIStatusError
+[跳过] D14 检索失败:APIStatusError
+[跳过] D15 检索失败:APIStatusError
+[跳过] D16 检索失败:APIStatusError
+[跳过] D17 检索失败:APIStatusError
+[跳过] D18 检索失败:APIStatusError
+[跳过] D19 检索失败:APIStatusError
+[跳过] D20 检索失败:APIStatusError
+[跳过] D21 检索失败:APIStatusError
+[跳过] D22 检索失败:APIStatusError
+[跳过] D23 检索失败:APIStatusError
+[跳过] D24 检索失败:APIStatusError
+[跳过] D25 检索失败:APIStatusError
+[跳过] D26 检索失败:APIStatusError
+[跳过] D27 检索失败:APIStatusError
+[跳过] D6 检索失败:ConnectError
+[跳过] D28 检索失败:APIStatusError
+[跳过] D29 检索失败:APIStatusError
+[跳过] D30 检索失败:APIStatusError
+[跳过] D31 检索失败:APIStatusError
+[跳过] D32 检索失败:APIStatusError
+[跳过] D33 检索失败:APIStatusError
+[跳过] D34 检索失败:APIStatusError
+[跳过] D35 检索失败:APIStatusError
+[跳过] D36 检索失败:APIStatusError
+[跳过] D37 检索失败:APIStatusError
+[跳过] D38 检索失败:APIStatusError
+[跳过] D39 检索失败:APIStatusError
+[跳过] D40 检索失败:APIStatusError
+[跳过] D41 检索失败:APIStatusError
+[跳过] D42 检索失败:APIStatusError
+[跳过] D43 检索失败:APIStatusError
+[跳过] D44 检索失败:APIStatusError
+[跳过] D45 检索失败:APIStatusError
+[跳过] D46 检索失败:APIStatusError
+[跳过] D47 检索失败:APIStatusError
+[跳过] D48 检索失败:APIStatusError
+[跳过] D49 检索失败:APIStatusError
+[跳过] D50 检索失败:APIStatusError
+[跳过] D52 检索失败:APIStatusError
+[跳过] D51 检索失败:APIStatusError
+[跳过] D53 检索失败:APIStatusError
+[跳过] D55 检索失败:APIStatusError
+[跳过] D54 检索失败:APIStatusError
+[跳过] D56 检索失败:APIStatusError
+[跳过] D57 检索失败:APIStatusError
+[跳过] D58 检索失败:APIStatusError
+[跳过] D59 检索失败:APIStatusError
+[跳过] D60 检索失败:APIStatusError
+=== evidence_confidence 分布(hybrid_rerank)===
+可答(ABCE)     n=238 min=0.489 p25=0.708 p50=0.757 p75=0.814 max=0.901
+应拒(D)        n=  9 min=0.504 p25=0.539 p50=0.543 p75=0.582 max=0.827
+
+=== 阈值扫描(通过率=conf>=t 的可答占比;放行率=conf>=t 的应拒占比)===
+     t      可答通过率      应拒放行率  YoudenJ
+  0.05      1.000      1.000    0.000
+  0.10      1.000      1.000    0.000
+  0.15      1.000      1.000    0.000
+  0.20      1.000      1.000    0.000
+  0.25      1.000      1.000    0.000
+  0.30      1.000      1.000    0.000
+  0.35      1.000      1.000    0.000
+  0.40      1.000      1.000    0.000
+  0.45      1.000      1.000    0.000
+  0.50      0.996      1.000   -0.004
+  0.51      0.996      0.889    0.107
+  0.54      0.987      0.556    0.432
+  0.55      0.979      0.444    0.535
+  0.58      0.975      0.333    0.641
+  0.59      0.971      0.111    0.859
+  0.60      0.962      0.111    0.851
+  0.65      0.908      0.111    0.796
+  0.70      0.765      0.111    0.654
+  0.75      0.534      0.111    0.423
+  0.80      0.298      0.111    0.187
+  0.85      0.118      0.000    0.118
+  0.90      0.004      0.000    0.004
+  0.95      0.000      0.000    0.000
+
+推荐阈值 evidence_confidence_threshold = 0.59(Youden J=0.859)
+请回填 app/config.py 默认值,并在 dev-notes/ch09.md 记录本次校准。

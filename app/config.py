@@ -74,7 +74,8 @@ class Settings(BaseSettings):
     langfuse_base_url: str = ""     # 如 http://localhost:3000(自部署地址,数据不出门)
 
     # ch09 置信度闸(正式版):阈值由 make calibrate-confidence 在 ch04 评估集上校准后回填
-    evidence_confidence_threshold: float = 0.5   # 占位;Task 6 校准后改为实测推荐值
+    # 2026-11-14 校准:推荐 0.59(Youden J=0.859,D 桶 9 条因上游报错未计入)
+    evidence_confidence_threshold: float = 0.59
 
 
 settings = Settings()
