@@ -53,6 +53,7 @@ async def test_resolve_reference_rewrites_with_history(monkeypatch):
         HumanMessage("这个能退吗")]})
     assert out["resolved_query"] == "蓝牙耳机还能申请退货吗"
     assert out["trace"]["coref"] == "rewrite"
+    assert out["trace"]["resolved_query"] == "蓝牙耳机还能申请退货吗"
 
 
 def test_extract_order_id():

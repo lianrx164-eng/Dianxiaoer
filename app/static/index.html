@@ -276,6 +276,26 @@
   .action-btn:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 #1c1c1c; }
   .action-btn:disabled { opacity: 0.45; cursor: default; box-shadow: none; transform: none; }
 
+  .order-cards { display: grid; gap: 8px; margin-top: 10px; }
+  .order-card {
+    text-align: left;
+    background: #fff8ec;
+    border: 2px solid #1c1c1c;
+    box-shadow: 3px 3px 0 #1c1c1c;
+    padding: 10px 12px;
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+    transition: transform 0.06s, box-shadow 0.06s, background 0.06s;
+  }
+  .order-card:hover { background: #ffe9c2; }
+  .order-card:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 #1c1c1c; }
+  .order-card:disabled { opacity: 0.45; cursor: default; box-shadow: none; transform: none; }
+  .order-card .order-head { display: flex; justify-content: space-between; font-weight: 700; }
+  .order-card .oid { color: #b34700; }
+  .order-card .product { margin-top: 4px; font-size: 14px; }
+  .order-card .status-line { margin-top: 2px; font-size: 12px; color: #6b5d4a; }
+
   .modal-mask {
     position: fixed; inset: 0; z-index: 60;
     background: rgba(28, 28, 28, 0.45);
@@ -291,7 +311,7 @@
   }
   .ticket-form h2 { margin: 0 0 14px; font-size: 17px; }
   .ticket-form label { display: block; margin: 0 0 6px; font-weight: 600; }
-  .ticket-form select, .ticket-form textarea {
+  .ticket-form select, .ticket-form textarea, .ticket-form input {
     width: 100%;
     border: 2px solid #1c1c1c;
     background: #fffdf6;
@@ -299,6 +319,7 @@
     padding: 8px 10px;
     margin-bottom: 14px;
   }
+  .ticket-form input[readonly] { background: #f3ead9; color: #6b5d4a; }
   .ticket-form textarea { min-height: 96px; resize: vertical; }
   .ticket-form .err { color: #b3261e; font-size: 12px; min-height: 18px; margin: -6px 0 8px; }
   .ticket-form .row-btns { display: flex; justify-content: flex-end; gap: 10px; }
@@ -775,11 +796,259 @@
         btn.textContent = '建工单';
         btn.addEventListener('click', () => openTicketModal(btn));
         bar.append(btn);
+      } else if (a.type === 'refund_form') {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'action-btn';
+        btn.textContent = '提交退款工单';
+        btn.addEventListener('click', () => openRefundModal(btn, a.draft || {}));
+        bar.append(btn);
       }
     }
     if (bar.children.length) {
       bubble.append(bar);
       scrollToBottom();
+    }
+  }
+
+  function showTyping(el) {
+    el.classList.add('streaming');
+    el.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
+  }
+
+  // 订单选择器:可点选卡片;点选后禁用整组并续跑暂停的子流程
+  function renderOrders(bubble, data) {
+    const wrap = document.createElement('div');
+    wrap.className = 'order-cards';
+    for (const o of data.orders || []) {
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'order-card';
+      const head = document.createElement('div');
+      head.className = 'order-head';
+      const oid = document.createElement('span');
+      oid.className = 'oid';
+      oid.textContent = '订单 ' + o.order_id;
+      const amount = document.createElement('span');
+      amount.className = 'amount';
+      amount.textContent = '¥' + (o.amount != null ? o.amount : '-');
+      head.append(oid, amount);
+      const product = document.createElement('div');
+      product.className = 'product';
+      product.textContent = o.product || '';
+      const status = document.createElement('div');
+      status.className = 'status-line';
+      status.textContent = o.status || '';
+      card.append(head, product, status);
+      card.addEventListener('click', () => {
+        for (const c of wrap.querySelectorAll('.order-card')) c.disabled = true;
+        resumeWithOrder(o.order_id);
+      });
+      wrap.append(card);
+    }
+    bubble.append(wrap);
+    scrollToBottom();
+  }
+
+  // 退款表单:订单号只读 + 原因固定类目下拉
+  function openRefundModal(triggerBtn, draft) {
+    const mask = document.createElement('div');
+    mask.className = 'modal-mask';
+    const form = document.createElement('form');
+    form.className = 'ticket-form';
+    form.noValidate = true;
+
+    const title = document.createElement('h2');
+    title.textContent = '提交退款工单';
+
+    const orderLabel = document.createElement('label');
+    orderLabel.textContent = '订单号';
+    orderLabel.htmlFor = 'refundOrder';
+    const order = document.createElement('input');
+    order.id = 'refundOrder';
+    order.type = 'text';
+    order.readOnly = true;
+    order.value = (draft && draft.order_id) || '';
+
+    const reasonLabel = document.createElement('label');
+    reasonLabel.textContent = '退款原因';
+    reasonLabel.htmlFor = 'refundReason';
+    const select = document.createElement('select');
+    select.id = 'refundReason';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = '请选择退款原因';
+    placeholder.disabled = true;
+    placeholder.selected = true;
+    select.append(placeholder);
+    for (const r of ['七天无理由', '质量问题', '发错货', '不想要了', '其他']) {
+      const opt = document.createElement('option');
+      opt.value = r;
+      opt.textContent = r;
+      select.append(opt);
+    }
+
+    const err = document.createElement('div');
+    err.className = 'err';
+    const btns = document.createElement('div');
+    btns.className = 'row-btns';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'btn';
+    cancel.textContent = '取消';
+    const submit = document.createElement('button');
+    submit.type = 'submit';
+    submit.className = 'btn';
+    submit.textContent = '提交';
+    btns.append(cancel, submit);
+    form.append(title, orderLabel, order, reasonLabel, select, err, btns);
+    mask.append(form);
+    document.body.append(mask);
+    select.focus();
+
+    const close = () => {
+      mask.remove();
+      document.removeEventListener('keydown', onKey);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') close(); };
+    document.addEventListener('keydown', onKey);
+    cancel.addEventListener('click', close);
+    mask.addEventListener('click', (e) => { if (e.target === mask) close(); });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      err.textContent = '';
+      if (!order.value || !select.value) {
+        err.textContent = '请选择退款原因';
+        return;
+      }
+      if (!conversationId) {
+        err.textContent = '会话已失效,请点击「+ 新对话」重试';
+        return;
+      }
+      submit.disabled = true;
+      try {
+        const resp = await fetch('/api/actions/create-refund', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            conversation_id: Number(conversationId),
+            order_id: order.value,
+            reason: select.value,
+          }),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.detail || ('HTTP ' + resp.status));
+        close();
+        addAssistant('退款申请已提交:' + (data.ticket_no || ''));
+        triggerBtn.disabled = true;
+      } catch (ex) {
+        err.textContent = '退款申请提交失败,请稍后重试';
+        submit.disabled = false;
+      }
+    });
+  }
+
+  // 统一消费 SSE:chat 与 resume 共用;返回待处理的中断(无则 null)
+  async function readSse(res, ui) {
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let interrupt = null;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buffer.indexOf('\n\n')) !== -1) {
+        const frame = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        const parsed = parseFrame(frame);
+        if (parsed.done) continue;
+        if (parsed.event === 'error') {
+          ui.upstreamError = (parsed.payload && parsed.payload.message) || '上游模型暂时不可用';
+          continue;
+        }
+        const payload = parsed.payload;
+        if (!payload) continue;
+        if (payload.event === 'tool' && payload.name) {
+          const badge = document.createElement('span');
+          badge.className = 'badge';
+          badge.textContent = '🔧 调用了 ' + payload.name;
+          ui.toolsEl.append(badge);
+          continue;
+        }
+        if (payload.event === 'done' && payload.conversation_id != null) {
+          saveConversationId(payload.conversation_id);
+          continue;
+        }
+        if (payload.event === 'interrupt') {
+          if (payload.conversation_id != null) saveConversationId(payload.conversation_id);
+          interrupt = payload;
+          continue;
+        }
+        if (payload.event === 'citations') {
+          ui.citations = Array.isArray(payload.items) ? payload.items : [];
+          ui.bubble._citations = ui.citations;
+          if (ui.rawText) ui.textEl.innerHTML = renderWithCitations(ui.rawText, ui.citations);
+          continue;
+        }
+        if (payload.event === 'actions') {
+          ui.actions = Array.isArray(payload.items) ? payload.items : [];
+          continue;
+        }
+        if (typeof payload.delta === 'string') {
+          if (!ui.started) { ui.started = true; ui.textEl.innerHTML = ''; }
+          ui.rawText += payload.delta;
+          ui.textEl.innerHTML = renderWithCitations(ui.rawText, ui.citations);
+          scrollToBottom();
+        }
+      }
+    }
+    return interrupt;
+  }
+
+  async function resumeWithOrder(orderId) {
+    if (!conversationId) {
+      addNotice('会话已失效,请点击「+ 新对话」重试');
+      return;
+    }
+    setBusy(true);
+    const { bubble, toolsEl, textEl } = createAssistantRow();
+    showTyping(textEl);
+    const ui = { bubble, toolsEl, textEl, rawText: '', started: false,
+                 citations: [], actions: [], upstreamError: null };
+    try {
+      const res = await fetch('/api/actions/resume', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversation_id: Number(conversationId), order_id: orderId }),
+      });
+      if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
+      const interrupt = await readSse(res, ui);
+      if (ui.upstreamError) throw new Error(ui.upstreamError);
+      if (interrupt) {
+        if (!ui.rawText) {
+          ui.started = true;
+          textEl.innerHTML = '';
+          textEl.textContent = '请选择要退款的订单:';
+        }
+        textEl.classList.remove('streaming');
+        renderOrders(bubble, interrupt);
+        return;
+      }
+      if (!ui.rawText) textEl.textContent = '(小喵这次没有回复内容,请再试一次)';
+      else addFeedback(bubble);
+      if (ui.actions.length) renderActions(bubble, ui.actions);
+      textEl.classList.remove('streaming');
+    } catch (err) {
+      textEl.classList.remove('streaming');
+      if (bubble.parentElement) bubble.parentElement.remove();
+      const msg = err && err.message ? err.message : '未知错误';
+      addNotice('续跑失败:' + msg + '。请再试一次。');
+    } finally {
+      setBusy(false);
+      inputEl.focus();
     }
   }
 
@@ -792,14 +1061,9 @@
       for (;;) {
         const userRow = addUser(text);
         const { bubble, toolsEl, textEl } = createAssistantRow();
-        textEl.classList.add('streaming');
-        // 等首字期间保持三个流动的点(工具执行时也不清空,免得看着像卡住)
-        textEl.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
-        let rawText = '';
-        let started = false;
-        let upstreamError = null;
-        let citations = [];
-        let actions = [];
+        showTyping(textEl);
+        const ui = { bubble, toolsEl, textEl, rawText: '', started: false,
+                     citations: [], actions: [], upstreamError: null };
 
         try {
           const res = await fetch('/api/chat', {
@@ -809,58 +1073,24 @@
           });
           if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
 
-          const reader = res.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = '';
-          while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            let idx;
-            while ((idx = buffer.indexOf('\n\n')) !== -1) {
-              const frame = buffer.slice(0, idx);
-              buffer = buffer.slice(idx + 2);
-              const parsed = parseFrame(frame);
-              if (parsed.done) continue;
-              if (parsed.event === 'error') {
-                upstreamError = (parsed.payload && parsed.payload.message) || '上游模型暂时不可用';
-                continue;
-              }
-              const payload = parsed.payload;
-              if (!payload) continue;
-              if (payload.event === 'tool' && payload.name) {
-                const badge = document.createElement('span');
-                badge.className = 'badge';
-                badge.textContent = '🔧 调用了 ' + payload.name;
-                toolsEl.append(badge);
-                continue;
-              }
-              if (payload.event === 'done' && payload.conversation_id != null) {
-                saveConversationId(payload.conversation_id);
-                continue;
-              }
-              if (payload.event === 'citations') {
-                citations = Array.isArray(payload.items) ? payload.items : [];
-                bubble._citations = citations;
-                if (rawText) textEl.innerHTML = renderWithCitations(rawText, citations);
-                continue;
-              }
-              if (payload.event === 'actions') {
-                actions = Array.isArray(payload.items) ? payload.items : [];
-                continue;
-              }
-              if (typeof payload.delta === 'string') {
-                if (!started) { started = true; textEl.innerHTML = ''; }
-                rawText += payload.delta;
-                textEl.innerHTML = renderWithCitations(rawText, citations);
-                scrollToBottom();
-              }
+          const interrupt = await readSse(res, ui);
+          if (ui.upstreamError) throw new Error(ui.upstreamError);
+
+          if (interrupt) {
+            // 图暂停在订单选择器:渲染可点选卡片,点选后走 /api/actions/resume 续流
+            if (!ui.rawText) {
+              ui.started = true;
+              textEl.innerHTML = '';
+              textEl.textContent = '请选择要退款的订单:';
             }
+            textEl.classList.remove('streaming');
+            renderOrders(bubble, interrupt);
+            return;
           }
-          if (upstreamError) throw new Error(upstreamError);
-          if (!rawText) textEl.textContent = '(小喵这次没有回复内容,请再试一次)';
+
+          if (!ui.rawText) textEl.textContent = '(小喵这次没有回复内容,请再试一次)';
           else addFeedback(bubble);
-          if (actions.length) renderActions(bubble, actions);
+          if (ui.actions.length) renderActions(bubble, ui.actions);
           textEl.classList.remove('streaming');
           return;
         } catch (err) {

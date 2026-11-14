@@ -105,7 +105,8 @@ async def coref(state) -> dict:
     query = _user_text(state)
     resolved = await coref_mod.resolve(query, _history_text(state))
     mode = "rewrite" if resolved != query else "passthrough"
-    return {"resolved_query": resolved, "trace": trace_of(state, coref=mode)}
+    return {"resolved_query": resolved,
+            "trace": trace_of(state, coref=mode, resolved_query=resolved)}
 
 
 async def classify_intent(state) -> dict:
