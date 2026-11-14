@@ -57,5 +57,14 @@ class Settings(BaseSettings):
     layer2_assistant_chars: int = 40
     layer2_tool_keep_chars: int = 120
 
+    # ch08 工具系统
+    mcp_logistics_url: str = "http://127.0.0.1:8101/mcp"
+    mcp_aftersales_url: str = "http://127.0.0.1:8102/mcp"
+    tool_default_timeout: float = 5.0
+    mcp_tool_timeout: float = 10.0
+    mcp_discovery_timeout: float = 3.0
+    tool_max_retries: int = 2
+    demo_ticket_delay_seconds: float = 0.0
+
 
 settings = Settings()

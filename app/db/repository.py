@@ -16,6 +16,7 @@ from app.db.models import (
     Message,
     QaExtractionStaging,
     Ticket,
+    ToolAuditLog,
 )
 
 _TICKET_SEQ = 0
@@ -484,3 +485,22 @@ async def list_conversations(user_id: str, limit: int = 50) -> list[dict]:
                 "created_at": conv.created_at.isoformat() if conv.created_at else None,
             })
         return out
+
+
+# ---------------- ch08 工具审计 ----------------
+
+
+async def insert_tool_audit(
+    conversation_id: int | None, tool_call_id: str | None, tool_name: str,
+    tool_source: str, mcp_server: str | None, arguments: dict | None,
+    result_summary: str | None, status: str, error_message: str | None,
+    retry_count: int, duration_ms: int | None,
+) -> None:
+    """工具调用审计落一条;调用方(engine)自行 try/except——审计失败不许反拦工具执行。"""
+    async with db.async_session() as s:
+        s.add(ToolAuditLog(
+            conversation_id=conversation_id, tool_call_id=tool_call_id,
+            tool_name=tool_name, tool_source=tool_source, mcp_server=mcp_server,
+            arguments=arguments, result_summary=result_summary, status=status,
+            error_message=error_message, retry_count=retry_count, duration_ms=duration_ms))
+        await s.commit()
