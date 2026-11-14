@@ -1,4 +1,4 @@
-.PHONY: dev test eval seed eval-agent kb-preview kb-build kb-vectorize kb-mine kb-reset eval-retrieval seed-conv eval-mining smoke-rag eval-rag eval-check judge-check eval-rewrite
+.PHONY: dev test eval seed eval-agent kb-preview kb-build kb-vectorize kb-mine kb-reset eval-retrieval seed-conv eval-mining smoke-rag eval-rag eval-check judge-check eval-rewrite smoke-graph eval-intent eval-ch05
 
 dev:
 	./scripts/dev.sh
@@ -60,3 +60,14 @@ judge-check:
 
 eval-rewrite:
 	PYTHONPATH=. uv run python scripts/eval_rewrite.py
+
+# ch05 fail-fast:LangGraph 图 + checkpointer + 多模式流式
+smoke-graph:
+	PYTHONUTF8=1 uv run python -m scripts.smoke_langgraph
+
+eval-intent:
+	PYTHONUTF8=1 uv run python -m scripts.eval_intent
+
+# 五验收端到端(需服务在跑;BASE_URL 改端口)
+eval-ch05:
+	PYTHONUTF8=1 uv run python -m scripts.eval_ch05

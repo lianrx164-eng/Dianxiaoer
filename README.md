@@ -174,3 +174,41 @@ PY
 
     uv run pytest -q   # 需 MySQL;Milvus 测试用临时 Lite 文件,不碰 data/milvus_knowledge.db
 
+
+---
+
+## Ch05:Workflow + Agent 混合架构(LangGraph)
+
+后端升级为「确定性骨架 + 主力 Agent」:LangGraph `StateGraph` 依次走 指代消解(透传)→ 意图识别(七类)→ 四出口分流 → 知识类强制检索 + 生成前证据闸 → 主力 Agent(ReAct 环)→ 日志。投诉不进 Agent,只回安抚话术并把「转人工」「建工单」交给前端自选;闲聊零模型调用。会话状态由 `AsyncSqliteSaver` 持久化(`thread_id = conversation_id`),MySQL 继续存消息审计、工单、低置信池。
+
+### 配置
+
+`.env` 增加(可选,默认值如下):
+
+    MAX_AGENT_STEPS=6
+    CHECKPOINTER_DB_PATH=data/ch05_checkpoints.sqlite
+
+checkpointer 的 sqlite 文件由 `AsyncSqliteSaver.setup()` 自建,已在 `.gitignore`。
+
+### 命令
+
+    make smoke-graph        # fail-fast:StateGraph + AsyncSqliteSaver + 多模式流式形状
+    make eval-intent        # 七类意图标注评估(14 条样例)
+    make eval-ch05          # 五验收端到端(需服务在跑;BASE_URL 改端口)
+    uv run python -m scripts.bare_agent_loop "订单1001的物流到哪了"   # 祛魅:裸 Agent 循环
+
+### 页面
+
+- `/` 聊天页:投诉类回答下出现「转人工」「建工单」两个独立按钮;转人工是前端模拟(显示已转接 + 客服小猫问候),建工单弹出表单(类别 售后/投诉/咨询 + 描述),提交后才写 `tickets`;两按钮互不绑定,不点继续聊天正常。
+
+### 验收映射
+
+1. **强制检索**:问「退货政策是什么」,服务日志出现 `ch05 turn ... route=knowledge trace={... 'forced_rag': True ...}`。
+2. **物流自调工具**:`/api/agent` 问「订单1001的物流到哪了」,`tool_calls` 为 `query_order → query_logistics`。
+3. **投诉两按钮**:聊天页说「我要投诉」→ 两按钮;点转人工显示「已转接人工客服」+「您好,我是客服小猫…」;点建工单填表后写库并显示单号;都不点继续对话正常。
+4. **闲聊固定话术**:「你好呀」→ `chitchat_reply`,不调工具。
+5. **ReAct 多步**:「我手机尾号1001那个订单发货没?到哪了?」→ `query_order` 取 `tracking_no` 再 `query_logistics`,`steps > 1`。
+
+### 测试
+
+    uv run pytest -q   # 需 MySQL;图单测用 InMemorySaver,不写 data/ch05_checkpoints.sqlite
