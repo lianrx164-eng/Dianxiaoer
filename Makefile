@@ -1,4 +1,4 @@
-.PHONY: dev test eval seed eval-agent kb-preview kb-build kb-vectorize kb-mine kb-reset eval-retrieval seed-conv eval-mining smoke-rag eval-rag eval-check judge-check eval-rewrite smoke-graph eval-intent eval-ch05
+.PHONY: dev test eval seed eval-agent kb-preview kb-build kb-vectorize kb-mine kb-reset eval-retrieval seed-conv eval-mining smoke-rag eval-rag eval-check judge-check eval-rewrite smoke-graph eval-intent eval-ch05 smoke-interrupt eval-coref eval-expand eval-ch06
 
 dev:
 	./scripts/dev.sh
@@ -71,3 +71,18 @@ eval-intent:
 # 五验收端到端(需服务在跑;BASE_URL 改端口)
 eval-ch05:
 	PYTHONUTF8=1 uv run python -m scripts.eval_ch05
+
+# ch06 fail-fast:interrupt/Command(resume)/astream 中断 surface
+smoke-interrupt:
+	PYTHONUTF8=1 uv run python -m scripts.smoke_interrupt
+
+# ch06 纯 Prompt 评估集(需上游可用)
+eval-coref:
+	PYTHONUTF8=1 uv run python -m scripts.eval_coref
+
+eval-expand:
+	PYTHONUTF8=1 uv run python -m scripts.eval_expand
+
+# ch06 四验收端到端(需服务在跑 + 已应用 sql/ch06-ticket-type.sql)
+eval-ch06:
+	PYTHONUTF8=1 uv run python -m scripts.eval_ch06
