@@ -796,7 +796,14 @@
   });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') hideCitePop(); });
 
-  // ---- 每段回答的满意度反馈(纯前端,一次性锁定) ----
+  // ---- 每段回答的满意度反馈(一次性锁定;👎/👍 上报后端,ch09) ----
+  function questionBefore(bubble) {
+    let row = bubble.closest('.row');
+    while (row && (row = row.previousElementSibling)) {
+      if (row.classList.contains('user')) return row.textContent.trim();
+    }
+    return '';
+  }
   function addFeedback(bubble) {
     if (bubble.querySelector('.feedback')) return;
     const bar = document.createElement('div');
@@ -817,10 +824,22 @@
     done.className = 'fb-done';
     done.textContent = '已反馈,谢谢!';
     const choose = (picked, other) => {
+      if (bar.dataset.given) return;
+      bar.dataset.given = '1';
       picked.classList.add('active');
       other.classList.add('dim');
       up.disabled = down.disabled = true;
       bar.classList.add('done');
+      if (!conversationId) return;
+      fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          conversation_id: Number(conversationId),
+          rating: picked === down ? 'down' : 'up',
+          question: questionBefore(bubble),
+        }),
+      }).catch(() => {});   // 失败静默,反馈条 UI 行为不变
     };
     up.addEventListener('click', () => choose(up, down));
     down.addEventListener('click', () => choose(down, up));

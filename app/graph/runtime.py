@@ -276,3 +276,17 @@ async def resume_turn(conversation_id: int, resume_value) -> dict:
     final = await graph.ainvoke(Command(resume=resume_value), config)
     await summarizer.maybe_schedule_summary(conversation_id)
     return _turn_result(conversation_id, final, prev_messages)
+
+
+async def get_turn_snapshot(conversation_id: int) -> dict:
+    """👎 快照尽力回捞:读该会话 checkpointer 终态,返回最近一轮的用户问题与召回快照。
+    调用方拿去比对被踩的 question,对得上才用快照——踩历史消息时快照可能已是别轮的,不硬塞。"""
+    config = {"configurable": {"thread_id": str(conversation_id)}}
+    st = await get_graph().aget_state(config)
+    values = getattr(st, "values", None) or {}
+    question = ""
+    for m in reversed(values.get("messages", [])):
+        if getattr(m, "type", "") == "human":
+            question = m.content if isinstance(m.content, str) else ""
+            break
+    return {"question": question, "snapshot": values.get("retrieved_snapshot") or []}
