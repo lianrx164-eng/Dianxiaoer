@@ -203,7 +203,7 @@
   - `repository.list_conversations(user_id, limit=50) -> list[dict]`(id/status/preview/has_summary/created_at;按 id desc)
 
 - [ ] **Step 1: 落 DDL 与 conftest**
-  - 把桌面 `C:\Users\Jia Bao Yu\Desktop\智能客服\CH_07\ch_07.sql` **原样**复制为 `sql/ch07-ddl.sql`(两段 ALTER + `conversation_summaries`;不改字段/索引)。
+  - 把桌面 `CH_07/ch_07.sql` **原样**复制为 `sql/ch07-ddl.sql`(两段 ALTER + `conversation_summaries`;不改字段/索引)。
   - `tests/conftest.py`:
     ```python
     _DDL_FILES = [..., pathlib.Path(...) / "sql" / "ch07-ddl.sql"]

@@ -27,7 +27,7 @@
 ## 权威来源
 
 - 本仓 spec:`docs/superpowers/specs/2026-11-14-ch06-intent-recognition-design.md`
-- 桌面 Spec/Plan:`C:\Users\Jia Bao Yu\Desktop\智能客服\CH_06\Sepc.md`、`Plan.md`(基线差异见 spec §2)
+- 桌面 Spec/Plan:`CH_06/Sepc.md`、`Plan.md`(基线差异见 spec §2)
 
 ---
 

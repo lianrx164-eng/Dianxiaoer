@@ -140,7 +140,7 @@ Expected: FAIL(`ToolAuditLog` / `insert_tool_audit` 不存在)。
 
 - [ ] **Step 5: 实现 DDL、模型、repository、测试库接线**
 
-`sql/ch08-ddl.sql` 原样复制桌面 `C:\Users\Jia Bao Yu\Desktop\智能客服\CH_08\ch_08.sql`(文件内无 ASCII `;` 注释,`split_statements` 可正常切分)。
+`sql/ch08-ddl.sql` 原样复制桌面 `CH_08/ch_08.sql`(文件内无 ASCII `;` 注释,`split_statements` 可正常切分)。
 
 `app/db/models.py` 尾部:
 
