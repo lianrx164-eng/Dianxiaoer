@@ -150,3 +150,10 @@ cost-report:
 # ch09 验收 2/3/4 端到端(需 make dev 在跑;BASE_URL 改端口)
 eval-ch09:
 	PYTHONPATH=. uv run python -m scripts.eval_ch09 --base-url $(or $(BASE_URL),http://127.0.0.1:8002)
+
+# ch10: 主题分类器(数据→训练→评测→ONNX→旁路批量归类)
+ch10-golden:  ## 预标 prompt 黄金样例验证(通过率 ≥ 80% 才放行批量预标)
+	PYTHONPATH=. uv run python scripts/ch10/validate_golden.py
+
+ch10-corpus:  ## 语料流水线:捞池→清洗→预标→模拟补足→导出人工抽审(需 mysql + 上游可用)
+	PYTHONPATH=. uv run python scripts/ch10/build_corpus.py
