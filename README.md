@@ -1,265 +1,129 @@
 # 店小二 Dianxiaoer · 电商售后智能客服
 
-在容错为零的业务里,让大模型可靠地干活。
+把确定性写进架构里的售后对话系统:业务铁律用代码定死,模型只负责需要推理的部分,判不准就转人工。
 
-用户问退换货政策、催物流、要退款,系统先判断意图:该查知识库的查知识库,该调订单接口的调订单接口,判不准的稳妥转人工。架构是确定性 Workflow 与 Agent 的混合——业务铁律用代码定死,开放推理才交给模型。
+## 为什么做这个
 
-FastAPI + LangGraph + LangChain,主链路 SSE 流式;MySQL 存业务数据,Milvus 存知识库,Phoenix 做可观测,ch10 用微调的 RoBERTa 做低置信度问题的主题归类。
+售后客服的失败代价不对称。模型答错一句「能退」,用户就会拿着截图来要退款,后面是真实的纠纷和赔付。这类场景要的不是更聪明的回答,而是**回答范围被工程手段限定住**:
 
-> 下面的章节是按开发顺序留下的完整记录,每一章都写着当时的验收标准和踩过的坑。
+- 退款能不能办,由售后政策和订单状态决定,不由模型决定
+- 知识问答必须给出处,给不出就明说不知道
+- 模型置信度低于校准过的阈值时转人工,不硬答
 
-## 启动
+这套约束拆成 10 个可验收的迭代落地,每一轮都有评估集和通过线,数字在下面的「质量与评测」里。
 
-    cp .env.example .env   # 填入 CHAT_API_KEY(上游真实 key)
-    bash scripts/dev.sh    # :8000 应用(Windows 未装 make,make dev 不可用;PORT=x 可换端口)
+## 能力
 
-应用内预览走 `.claude/launch.json`(8002,带 `--reload`),与命令行入口等价,只是端口不同。
+| 能力 | 实现方式 |
+|---|---|
+| 意图分流 | 8 类业务意图 + 「其他」,分流到确定性流程、知识检索、Agent 三条路 |
+| 知识问答 | BM25 + 向量混合召回 → 重排 → 取 Top-K;证据不足拒答 |
+| 业务工具 | 订单、物流、保修、退货状态,后端以 MCP Server 独立进程提供 |
+| 退款办理 | LangGraph interrupt 暂停 → 用户点选订单并确认 → `Command(resume)` 续跑 |
+| 建工单 | 写操作需确认令牌,模型绕不过 |
+| 兜底转人工 | 证据置信度闸,阈值由评估集校准;低置信度问题落池 |
+| 低置信度飞轮 | 落池 → 标准化 + 全表查重 + occurrence 累加 → 人工审核 → 写回知识库 |
+| 主题归类 | 17 类多标签分类器,看问题集中在哪块知识,指导补什么 |
 
-## 验收
+## 架构
 
-> Git Bash / GBK 终端里直接 `curl -d '{"message":"中文"}'` 会被终端转码成非 UTF-8,服务返回 `400 There was an error parsing the body`。含中文的请求用下面的 `uv run python`(httpx 按 UTF-8 编码),或把 JSON 存成 UTF-8 文件再用 `curl --data-binary @body.json`。
-
-```bash
-# 1. 流式对话(逐 token;ch02 起请求体为 user_id/conversation_id)
-uv run python - <<'PY'
-import httpx
-with httpx.stream("POST", "http://localhost:8000/api/chat",
-                  json={"user_id": "u1", "message": "你们卖猫粮吗?"},
-                  timeout=120) as r:
-    for line in r.iter_lines():
-        print(line)
-PY
-
-# 2. 两轮上下文
-bash scripts/demo_chat.sh
-
-# 3. 结构化提取
-uv run python - <<'PY'
-import httpx
-r = httpx.post("http://localhost:8000/api/extract",
-               json={"text": "订单 MH20260701123 的猫爬架散架了,我要退款"},
-               timeout=120)
-print(r.json())
-PY
+```
+客户端
+  │  POST /api/chat(SSE 流)
+  ▼
+接入层    FastAPI 路由 + SSE 帧协议(tool / delta / done / error)
+  ▼
+编排层    LangGraph:意图路由 → 三条执行路
+          ├─ 确定性 Workflow   政策判定、订单查询、退款流程(条件写死在代码)
+          ├─ 知识检索          hybrid 召回 → rerank → 证据组装
+          └─ Agent ReAct       开放问题,工具自选,步数封顶
+  ▼
+治理层    置信度闸 · 权限门 · 工具审计 · 中断确认
+  ▼
+能力层    工具注册表 · MCP Client · 知识库双写 · 主题分类器(旁路)
+  ▼
+数据层    MySQL(业务) · Milvus(向量) · SQLite(checkpoint)
+  ▼
+可观测    Phoenix(OTel span 全链路) + 按意图聚合的 token 成本账
 ```
 
-## 测试
-
-    uv run pytest -v              # 单测(不打真实模型)
-    uv run python scripts/eval_extract.py   # 标注样例评估(需服务运行中)
-
----
-
-## Ch02:Function Calling 工具链
-
-在 ch01 聊天入口上装「查数据」能力:模型经 Function Calling 自选工具(订单/商品/物流 mock、FAQ 查表、建工单),后端单轮执行回灌,最终回答 SSE 逐 token 流式,聊天页气泡显示工具徽章。
-
-### 数据库(本机 MySQL 8.0;仓库也带 docker-compose.yml)
-
-本机开发用已有 MySQL 服务,库名 `dianxiaoer_ch02`(隔离,不动已有数据):
-
-    mysql -uroot -p --default-character-set=utf8mb4 -e "CREATE DATABASE IF NOT EXISTS dianxiaoer_ch02 CHARACTER SET utf8mb4"
-    mysql -uroot -p --default-character-set=utf8mb4 dianxiaoer_ch02 < sql/ch02-ddl.sql
-    # .env 里 DATABASE_URL / TEST_DATABASE_URL 指向 localhost:3306/dianxiaoer_ch02 与 dianxiaoer_test
-    uv run python scripts/seed_db.py   # faq 种子,幂等(也可 make seed)
-
-有 Docker 的机器:`docker compose up -d` 首启按序执行 `sql/ch02-ddl.sql`、`sql/ch02-seed.sql`。
-
-### 接口
-
-- POST `/api/chat`(SSE,前端主入口):请求 `{user_id, message, conversation_id?}`;帧 `tool` / `delta` / `done` / `event: error` / `[DONE]`
-- POST `/api/agent`(JSON,程序化/测试出口):一次性返回 `tool_calls` + `tool_results` + `answer`
-
-### 验收
-
-    bash scripts/dev.sh                       # :8000(PORT 可换)
-    BASE_URL=http://localhost:8000 uv run python scripts/eval_agent.py   # 标注样例评估
-    BASE_URL=http://localhost:8000 bash scripts/demo_agent.sh            # 三条验收走 /api/agent
-
-浏览器打开聊天页:问「订单 1001 的物流到哪了」「退货政策是什么」能看到工具徽章并基于结果作答;「邮费是多少」是**预期**的关键词漏召回(答案在「运费怎么算」条目里),留给 ch03 向量检索升级。
-
-### 测试
-
-    uv run pytest -v   # 需 MySQL 在跑;conftest 自动重建 dianxiaoer_test 库并从 sql/ch02-ddl.sql 建表
-
----
-
-## Ch03:知识库向量语义检索(RAG 基础)
-
-把 `query_faq` 的内部实现从关键词查表升级为 dense 向量检索(阿里云百炼 `text-embedding-v4` + Milvus Lite),工具入参出参契约不变;MySQL 存原文权威源并记录双写状态,离线建库与录入页都在仓库里。
-
-### 配置
-
-`.env` 增加嵌入那一组(密钥只存本地):
-
-    EMBED_BASE_URL=https://maas.qianwenaiapi.com/compatible-mode/v1
-    EMBED_MODEL=text-embedding-v4
-    EMBED_API_KEY=sk-xxx
-
-数据库:在已建好的 `dianxiaoer_ch02` 库上补 ch03 两张表:
-
-    mysql -uroot -p --default-character-set=utf8mb4 dianxiaoer_ch02 < sql/ch03-ddl.sql
-
-脚本方式(无 mysql CLI 时):用 SQLAlchemy 执行 `sql/ch03-ddl.sql`,语句切分复用 `app/db/sql_script.py`。
-
-### 建库与检索
-
-    make kb-preview        # dry-run:按材料清单切块并打印各文件结果
-    make kb-build          # data/kb/*.md → knowledge_chunks(pending)
-    make kb-vectorize      # pending → 嵌入 → Milvus,回填 done(幂等可重跑)
-    make eval-retrieval    # 换说法召回评估(验收 1)
-    make seed-conv         # 合成历史客服对话(幂等)
-    make kb-mine           # 对话挖 QA → staging → 去重 → pending
-    make eval-mining       # 抽取质量评估
-    make kb-reset          # 清空 knowledge_chunks + drop Milvus 集合(重建前用;需先停服务)
-
-> 作业按钮与 Makefile 是同一份配方;本机若没有 `make`,先安装 GNU make(`winget install --id ezwinports.make -e`)。
-> Milvus Lite 对数据目录是进程级独占:服务跑着时,**向量化与清库走页面/API**(`/api/kb/vectorize`、`/api/kb/reset`),终端 `make kb-vectorize` / `make kb-reset` 需先停 dev server;`kb-preview / kb-build / kb-mine / seed-conv` 不受影响。
-
-### 页面
-
-- `/` 聊天页:问「邮费是多少」会触发 `query_faq`,召回运费条款并作答(验收 1)
-- `/kb` 知识库录入:库存闸条、手工录入与切块预览、材料清单、挖知识暂存、向量化补 pending、检索自测、最近入库
-- `/admin` 后台聚合首页:四张卡,某块依赖不可用只让自己显示「读数失败」
-
-### 验收
-
-1. **换说法召回**:`make eval-retrieval` 5/5;`/kb` ⑤ 检索自测「邮费是多少」Top-1 为「运费怎么算」;聊天页问同一句能看到工具徽章与包邮规则。
-2. **中断重跑**:`tests/test_dualwrite.py::test_vectorize_resumes_after_crash`(注入第 2 批嵌入失败 → 重跑只捡 pending);页面 ④ 区「向量化待补块」与闸条三数对齐。
-3. **建库全链**:`/kb` ① 贴一段正文 → 切块预览 → 入库并向量化 → 重录同一段显示「跳过重复」;`kb-preview / kb-build / kb-mine / kb-vectorize` 在页面上按得动,日志尾可读。
-
-### 测试
-
-    uv run pytest -q   # 需 MySQL 在跑;conftest 从 ch02/ch03 DDL 重建 dianxiaoer_test,单测不打真实嵌入 API
-
----
-
-## Ch04:混合检索 + 重排 + 评估体系(RAG 进阶)
-
-`query_faq` 升级为完整 RAG 管线:Query 改写/同义词 → 元数据过滤 → dense + BM25 混合召回(`hybrid_search` + RRF)→ 百炼 `qwen3-rerank` 精排 Top-10 → 机械闸 + 生成前自评两道证据闸 → 首尾组装 + 编号证据。Milvus 沿用 Lite(milvus-lite 3.2.2 已支持原生 BM25,`jieba` 分词),不引入 Docker;代价是独占锁,离线建库/评估前先停服务。
-
-### 配置与建表
-
-`.env` 在 ch03 基础上可选加重排(不填则复用 `EMBED_API_KEY`):
-
-    RERANK_URL=https://maas.qianwenaiapi.com/api/v1/services/rerank/text-rerank/text-rerank
-    RERANK_MODEL=qwen3-rerank
-    # RERANK_API_KEY=sk-xxx
-
-在 `dianxiaoer_ch02` 上补 ch04 两张表:
-
-    mysql -uroot -p --default-character-set=utf8mb4 dianxiaoer_ch02 < sql/ch04-ddl.sql
-
-### 命令
-
-    make smoke-rag          # fail-fast:Milvus Lite BM25 + hybrid_search / 百炼 rerank
-    make kb-reset           # 重建前清空(先停服务)
-    make kb-build           # data/kb/*.md → knowledge_chunks(pending)
-    make kb-vectorize       # 嵌入 + BM25 text → Milvus
-    make eval-check         # 评估集自检:题数/去重/章节可命中/要点逐字在库
-    make eval-rewrite       # Query 改写标注样例(5/5 通过)
-    make eval-rag           # 四策略 × 五桶评估:检索 + 证据覆盖度 + 生成,落 data/ch04/reports/
-    make judge-check        # 拿台账里已处置个案重放裁判,不一致退出码 1
-
-### 页面
-
-- `/` 聊天页:回答里的 `[n]` 可点,弹出来源章节 + 原文;每段回答左下角 👍/👎,点一次点亮并锁定(纯前端采集)
-- `/kb` 知识库录入(沿用 ch03)
-- `/rag-eval` RAG 评估页:四项 KPI、四策略分桶图、完整数据表、生成质量、编造个案台账(可处置/退回)、就地重跑
-- `/admin` 后台首页:五张卡(新增 RAG 评估:最佳 MRR、评估集题数、库外拒答率)
-
-### 验收映射
-
-1. **四策略报告**:`make eval-rag` 跑完 `data/ch04/reports/rag_eval.{txt,json}`,`/rag-eval` 读同一份 json,不重算。本轮 300 题实测(评估先跑 Query 改写):混合+重排总体 MRR 0.9012 / Recall@5 0.9764(纯向量 0.8859 / 0.9625,纯 BM25 0.8415 / 0.9736);C 口语桶 BM25 MRR 0.8621、混合+重排 0.9403;答案覆盖度 99.2%,Faithfulness 1.0,D 桶拒答 54/56(96.4%)。
-2. **型号 BM25 命中**:`make eval-rag` 的 B 桶;CLI `search_knowledge('MH-W40 滤芯', strategy='bm25')` 命中型号小节。
-3. **引用可定位**:聊天页问「邮费是多少」,回答带 `[1]`,点击看到 `section_path` + 原文。
-4. **库外拒答 + 落池**:问「你们卖火星车吗」,明确拒答;`low_confidence_questions` 出现 `retrieval_low_conf` 或 `self_check` 记录。
-5. **满意度反馈**:任一回答左下角 👍/👎,点击后点亮、显示「已反馈」、两键锁定。
-
-### 测试
-
-    uv run pytest -q   # 需 MySQL;Milvus 测试用临时 Lite 文件,不碰 data/milvus_knowledge.db
-
-
----
-
-## Ch05:Workflow + Agent 混合架构(LangGraph)
-
-后端升级为「确定性骨架 + 主力 Agent」:LangGraph `StateGraph` 依次走 指代消解(透传)→ 意图识别(七类)→ 四出口分流 → 知识类强制检索 + 生成前证据闸 → 主力 Agent(ReAct 环)→ 日志。投诉不进 Agent,只回安抚话术并把「转人工」「建工单」交给前端自选;闲聊零模型调用。会话状态由 `AsyncSqliteSaver` 持久化(`thread_id = conversation_id`),MySQL 继续存消息审计、工单、低置信池。
-
-### 配置
-
-`.env` 增加(可选,默认值如下):
-
-    MAX_AGENT_STEPS=6
-    CHECKPOINTER_DB_PATH=data/ch05_checkpoints.sqlite
-
-checkpointer 的 sqlite 文件由 `AsyncSqliteSaver.setup()` 自建,已在 `.gitignore`。
-
-### 命令
-
-    make smoke-graph        # fail-fast:StateGraph + AsyncSqliteSaver + 多模式流式形状
-    make eval-intent        # 意图标注评估(现为 8 类 16 条,见 ch06)
-    make eval-ch05          # 五验收端到端(需服务在跑;BASE_URL 改端口)
-    uv run python -m scripts.bare_agent_loop "订单1001的物流到哪了"   # 祛魅:裸 Agent 循环
-
-### 页面
-
-- `/` 聊天页:投诉类回答下出现「转人工」「建工单」两个独立按钮;转人工是前端模拟(显示已转接 + 客服小猫问候),建工单弹出表单(类别 售后/投诉/咨询 + 描述),提交后才写 `tickets`;两按钮互不绑定,不点继续聊天正常。
-
-### 验收映射
-
-1. **强制检索**:问「退货政策是什么」,服务日志出现 `ch05 turn ... route=knowledge trace={... 'forced_rag': True ...}`。
-2. **物流自调工具**:`/api/agent` 问「订单1001的物流到哪了」,`tool_calls` 为 `query_order → query_logistics`。
-3. **投诉两按钮**:聊天页说「我要投诉」→ 两按钮;点转人工显示「已转接人工客服」+「您好,我是客服小猫…」;点建工单填表后写库并显示单号;都不点继续对话正常。
-4. **闲聊固定话术**:「你好呀」→ `chitchat_reply`,不调工具。
-5. **ReAct 多步**:「订单1001买的是什么?顺便看看物流到哪了」→ `query_order` 取 `tracking_no` 再 `query_logistics`,`steps > 1`。
-
-### 测试
-
-    uv run pytest -q   # 需 MySQL;图单测用 InMemorySaver,不写 data/ch05_checkpoints.sqlite
-
-
----
-
-## Ch06:意图识别与对话管理(分流器正式版)
-
-把 ch05 的分流器做实:`coref`(指代消解 + Query 改写)→ 八类意图 + confidence → 五出口。退款退货/售后走确定性子流程:缺订单号用 LangGraph `interrupt` 弹订单选择器,`Command(resume)` 回填;`retrieve_policy` 用 Query 扩写(严格 3 条)多查去重合并强制检索政策;主力 Agent 只判「这一单能不能退」,能退调 `submit_refund` 被拦成前端退款表单。闲聊/其他零模型固定话术;投诉仍不进 Agent。
-
-### 配置(可选,默认值如下)
-
-    INTENT_MODEL=                 # 意图识别模型;空=回落 CHAT_MODEL(先求准)
-    INTENT_SMALL_MODEL=           # 降级路小模型(仅种子,本章未接运行时)
-    INTENT_MODE=accuracy          # accuracy=只用大模型
-    INTENT_CONF_THRESHOLD=0.6     # cost 模式升级阈值(仅种子)
-
-### 数据迁移
-
-存量库执行一次(tests 用的建表 DDL 已同步):
-
-    uv run python scripts/seed_db.py sql/ch06-ticket-type.sql
-
-### 命令
-
-    make smoke-interrupt    # interrupt/Command(resume)/astream 中断 surface
-    make eval-intent        # 八类 + 「其他」+ 多轮漂移 + JSON 稳定
-    make eval-coref         # 指代补全 + 已完整透传
-    make eval-expand        # 核心场景严格 3 条扩写
-    make eval-ch06          # 四验收端到端(需服务在跑;BASE_URL 改端口)
-
-### 页面
-
-- 退款类问题不带订单号:聊天流里出现订单卡片;点选后自动续跑,判定结果下出现「提交退款工单」按钮。
-- 退款表单:订单号只读 + 原因固定下拉(七天无理由/质量问题/发错货/不想要了/其他),提交后写 `tickets`(`ticket_type='退款'`)并显示单号。
-- 订单选择器暂停期间新消息不会被处理(图停在补槽位):请点选订单,或点「+ 新对话」重新开始。
-
-### 验收映射
-
-1. **多轮漂移**:「订单1001的物流到哪了」→「那它能退吗」→「算了,它现在到哪了」,`trace.route` 依次 `business → refund_flow → business`,`trace.resolved_query` 每轮补全。
-2. **JSON 稳定/其他兜底**:`make eval-intent`;怪问题「帮我写一首关于宇宙的诗」→ `intent=其他`、`route=fallback_script`、固定话术。
-3. **退款子流程**:「订单2002这个能退吗」→ `trace.route=refund_flow`、`trace.retrieve_policy` 有 3 条 query 与命中数、回答给出判定。
-4. **订单选择器**:新会话「我要退款」→ `interrupt` 返回订单;点选 → `/api/actions/resume` 续流出判定与退款按钮 → 表单提交写库(`dev-notes/ch06-acceptance4-*.jpg`)。
-
-### 测试
-
-    uv run pytest -q   # 需 MySQL;interrupt 单测用最小图 + InMemorySaver
+**分类器走旁路。** 主题归类不进实时对话链路:低置信度问题先落池,攒够一批再离线归类写表。实时路径的延迟和可用性不依赖它。
+
+## 关键设计决策
+
+| 决策 | 放弃的备选 | 理由 |
+|---|---|---|
+| 意图分流先于 Agent | 所有问法都交给 ReAct 自选工具 | 售后问法大部分是确定的,先分类能省一次模型往返,行为也可预测 |
+| 业务铁律写死在代码 | 全部写进 prompt 约束 | prompt 是建议,代码是保证;政策、金额、可退条件这类不能赌模型记性 |
+| 判不准就转人工 | 让模型兜底编一个答案 | 转人工是可接受的失败,编答案是不可接受的失败 |
+| 退款走 interrupt 确认 | 模型直接调 `submit_refund` | 涉及钱的动作必须有人点确认,模型没有这个权限 |
+| 分类器旁路批处理 | 实时调用分类服务 | 归类结果只用于运营决策,不需要秒级一致 |
+| 全参数微调 RoBERTa-wwm-ext | LoRA / 纯 prompt 分类 | 17 类多标签,单卡 8GB 放得下;全参微调便于导出 ONNX 做轻服务 |
+| ONNX + tokenizers 独立进程 | 直接起 transformers | 推理进程不背 torch,依赖面小,起停快 |
+
+## 质量与评测
+
+| 子系统 | 指标 | 结果 |
+|---|---|---|
+| 自动化测试 | pytest 全量 | 410 通过 |
+| 检索(ch04) | 300 题评估集,hybrid+rerank 的 recall@5 / MRR | 0.9764 / 0.9012 |
+| 生成(ch04) | 库外问题拒答率 | 96.4%(56 题判定) |
+| 置信度校准(ch09) | Youden J / 推荐阈值 | 0.8595 / 0.59 |
+| 主题分类(ch10) | 17 类多标签,测试集 micro-F1 / macro-F1 | 0.9356 / 0.9255 |
+
+**如实说明**:ch10 有两条严档红线未达标——尺码 0.783、退换货 0.895,各自的红线是 0.9。原因是这两类在语料里边界样本不足,错例集中在「尺码不合适」与「质量问题想退」的交叉地带。处理方式是补边界样本后重训,不是调低红线;错例明细在 `data/ch10/reports/eval_report.md`。
+
+## 运行
+
+前提:Python 3.12、MySQL 8.0、uv。
+
+```bash
+cp .env.example .env        # 填上游 key 与数据库连接
+uv sync
+uv run python scripts/seed_db.py
+bash scripts/dev.sh         # :8000
+```
+
+服务拓扑:
+
+| 服务 | 端口 | 说明 |
+|---|---|---|
+| 应用 | 8000 / 8002 | FastAPI,SSE 主入口 |
+| 主题分类器 | 8110 | ONNX 推理,独立进程,旁路 |
+| MCP 物流 / 售后 | 8101 / 8102 | mock 后端 |
+| Phoenix | 6006 | 链路追踪 |
+
+常用命令:
+
+```bash
+make dev                 # 起应用
+make eval-rag            # 检索 + 生成评估
+make phoenix-up          # 可观测
+make ch10-eval           # 分类器评测
+```
+
+后台各页(`/admin`、`/kb`、`/review`、`/observability`、`/topics`、`/acceptance`)共用一套导航;`/acceptance` 里九个验收闸各自带重跑按钮,某个依赖挂掉只影响它自己那张卡。
+
+## 已知限制
+
+- 单机部署,后台页没有鉴权,只适合内网或演示环境
+- 没有 CI,测试靠本地 `pytest`
+- 分类器语料是真实池样本加模拟补量(每类约 100 条),不等于线上全量分布
+- 上游模型的能力和价格随供应商变化,成本账按当前价格估算
+- ch10 两条严档红线未达标,原因见上
+
+## 目录结构
+
+```
+app/          FastAPI 服务:api 路由 / core 编排 / db / kb / tools / graph / static 页面
+scripts/      各章评估脚本与 ch10 训练流水线
+mcp_servers/  两个 MCP 后端(mock 数据)
+sql/          各章 DDL
+tests/        单测与评估夹具
+docs/         设计文档、实施计划、开发记录
+dev-notes/    每一步的决策、返工与验收记录
+```
+
+## 开发过程
+
+项目按 10 个可验收的迭代推进,每一轮都是先定设计文档与实施计划、测试驱动实现、再跑评估和两轴评审。设计与计划在 `docs/` 下,每一步的裁决与踩坑在 `dev-notes/`,按章节顺序整理的完整记录见 [`docs/journal.md`](docs/journal.md)。
