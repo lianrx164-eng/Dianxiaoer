@@ -698,3 +698,43 @@ async def topic_distribution(samples_per_class: int = 3) -> dict:
         "classes": [{"label": n, "count": counts[n], "samples": samples[n]}
                     for n in TOPIC_NAMES],
     }
+
+
+async def topic_questions(label: str, page: int = 1, size: int = 20) -> dict:
+    """某一类目下的全部问题(分页):labels 是 JSON 数组,筛选与分页在 Python 侧做。
+
+    归类总量是问题池规模(百级),一次全捞换来不依赖 MySQL 的 JSON 函数,
+    测试库上结果一致。多标签问题在它命中的每个类目下都出现。
+    """
+    stmt = (
+        select(TopicClassification.labels, TopicClassification.classified_at,
+               LowConfidenceQuestion.id, LowConfidenceQuestion.raw_question,
+               LowConfidenceQuestion.source, LowConfidenceQuestion.created_at,
+               ReviewQueue.normalized_question, ReviewQueue.occurrence_count,
+               ReviewQueue.review_status)
+        .join(LowConfidenceQuestion,
+              TopicClassification.question_id == LowConfidenceQuestion.id)
+        .outerjoin(ReviewQueue, LowConfidenceQuestion.matched_review_id == ReviewQueue.id)
+        .order_by(TopicClassification.classified_at.desc(), TopicClassification.id.desc())
+    )
+    async with db.async_session() as s:
+        rows = (await s.execute(stmt)).all()
+    matched = [r for r in rows if label in (r.labels or [])]
+    total = len(matched)
+    size = max(1, min(size, 100))
+    pages = max(1, (total + size - 1) // size)
+    page = max(1, min(page, pages))
+    chunk = matched[(page - 1) * size: page * size]
+    items = [{
+        "question_id": r.id,
+        "text": r.normalized_question or r.raw_question,
+        "raw_question": r.raw_question,
+        "labels": r.labels or [],
+        "source": r.source,
+        "occurrence_count": r.occurrence_count,
+        "review_status": r.review_status,
+        "pooled_at": r.created_at.isoformat() if r.created_at else None,
+        "classified_at": r.classified_at.isoformat() if r.classified_at else None,
+    } for r in chunk]
+    return {"label": label, "total": total, "page": page, "pages": pages,
+            "size": size, "items": items}
