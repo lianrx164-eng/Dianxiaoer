@@ -96,3 +96,13 @@ def review_page() -> FileResponse:
 @app.get("/observability", include_in_schema=False)
 def observability_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "observability.html")
+
+
+@app.get("/topics", include_in_schema=False)
+def topics_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "topics.html")
+
+
+@app.get("/topics/questions", include_in_schema=False)
+def topic_questions_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "topic-questions.html")

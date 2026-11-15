@@ -1971,9 +1971,10 @@ from app.db.sql_script import split_statements
 async def main():
     sql = pathlib.Path('sql/ch10-ddl.sql').read_text(encoding='utf-8')
     async with async_session() as s:
+        conn = await s.connection()          # exec_driver_sql 在 Connection 上,不在 AsyncSession
         for stmt in split_statements(sql):
             if 'CREATE TABLE' in stmt.upper():
-                await s.exec_driver_sql(stmt)
+                await conn.exec_driver_sql(stmt)
         await s.commit()
     print('ch10 DDL applied')
 asyncio.run(main())

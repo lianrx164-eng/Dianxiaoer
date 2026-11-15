@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>主题分布 | 喵喵优选</title>
+<link rel="stylesheet" href="/static/acceptance.css">
+<script src="/static/admin.js"></script>
+<script src="/static/acceptance.js"></script>
+<style>
+  .bar-row .blabel a { color: var(--ink); text-decoration: none; border-bottom: 1px dashed #c9a36a; }
+  .bar-row .blabel a:hover { color: #b45309; }
+  .samples { margin: -2px 0 10px 104px; font-size: 12px; color: #6b5b45; }
+  .samples li { margin: 2px 0; }
+  .more { font-size: 11.5px; margin-left: 104px; }
+  .more a { color: #b45309; }
+</style>
+</head>
+<body class="admin-page">
+<div id="admin-nav"></div>
+<main class="admin-shell">
+  <h1 class="admin-title">主题分布</h1>
+  <p class="admin-sub">旁路批量归类的结果:哪类堆得多,就先补哪块知识。</p>
+
+  <div class="stats" id="stats"></div>
+
+  <section class="panel">
+    <div class="panel-head"><h2>17 类问题量</h2>
+      <span class="panel-note">点类目名进这一类的问题列表</span></div>
+    <div class="panel-body" id="bars"><p class="muted">加载中…</p></div>
+  </section>
+</main>
+<script>
+mountAdminNav('topics');
+
+function fmtTime(ts) {
+  if (!ts) return '—';
+  return ts.replace('T', ' ').slice(0, 16);
+}
+
+(async () => {
+  let d;
+  try {
+    d = await AC.getJSON('/api/topics/distribution');
+  } catch (e) {
+    document.getElementById('bars').innerHTML =
+      '<p class="muted">读取失败:' + e.message + '</p>';
+    return;
+  }
+  const total = d.total;
+  document.getElementById('stats').innerHTML = '';
+  const stat = (k, v) => {
+    const t = AC.el('div', { class: 'tile' }, [
+      AC.el('div', { class: 'muted', text: k }),
+      AC.el('div', { class: 'mono', text: v }),
+    ]);
+    document.getElementById('stats').appendChild(t);
+  };
+  stat('已归类问题', String(total));
+  stat('最近归类', fmtTime(d.latest));
+
+  const rows = [...d.classes].sort((a, b) => b.count - a.count);
+  const max = Math.max(1, ...rows.map(r => r.count));
+  const host = document.getElementById('bars');
+  host.innerHTML = '';
+  if (!total) {
+    host.innerHTML = '<p class="muted">还没有归类结果:先跑分类器与 <code>make classify-pool</code>。</p>';
+    return;
+  }
+  rows.forEach(r => {
+    const pct = Math.round(r.count / max * 100);
+    const link = AC.el('a', { href: '/topics/questions?label=' + encodeURIComponent(r.label),
+                              text: r.label });
+    const row = AC.el('div', { class: 'bar-row' + (r.count ? '' : ' zero') }, [
+      AC.el('div', { class: 'blabel' }, [link]),
+      AC.el('div', { class: 'bar-track' }, [AC.el('i', { style: 'width:' + pct + '%' })]),
+      AC.el('div', { class: 'bval', text: String(r.count) }),
+    ]);
+    host.appendChild(row);
+    if (r.samples && r.samples.length) {
+      const ul = AC.el('ul', { class: 'samples' },
+        r.samples.map(s => AC.el('li', { text: s })));
+      host.appendChild(ul);
+    }
+    host.appendChild(AC.el('div', { class: 'more' }, [
+      AC.el('a', { href: '/topics/questions?label=' + encodeURIComponent(r.label),
+                   text: '查看全部 ' + r.count + ' 条 →' }),
+    ]));
+  });
+})();
+</script>
+</body>
+</html>

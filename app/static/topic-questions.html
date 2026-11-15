@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>类目问题列表 | 喵喵优选</title>
+<link rel="stylesheet" href="/static/acceptance.css">
+<script src="/static/admin.js"></script>
+<script src="/static/acceptance.js"></script>
+<style>
+  .qtext { font-weight: 600; }
+  .qraw { color: #6b5b45; font-size: 12px; margin-top: 3px; }
+  .pager { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
+  .pager a { color: #b45309; }
+  .pager .off { color: #b9a98f; }
+</style>
+</head>
+<body class="admin-page">
+<div id="admin-nav"></div>
+<main class="admin-shell">
+  <h1 class="admin-title" id="title">类目问题</h1>
+  <p class="admin-sub">这一类下归类到的全部问题;多标签问题在它命中的每个类目下都会出现。</p>
+
+  <div class="tabs" id="tabs"></div>
+
+  <section class="panel">
+    <div class="panel-body">
+      <div class="tablerow">
+        <table class="tbl" id="tbl">
+          <thead><tr>
+            <th>问题</th><th>命中类目</th><th>来源</th>
+            <th>同义合并</th><th>审核</th><th>归类时间</th>
+          </tr></thead>
+          <tbody id="rows"><tr><td colspan="6" class="muted">加载中…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="pager" id="pager"></div>
+    </div>
+  </section>
+</main>
+<script>
+mountAdminNav('topics');
+
+const params = new URLSearchParams(location.search);
+const label = params.get('label') || '';
+const page = Math.max(1, parseInt(params.get('page') || '1', 10) || 1);
+const size = 20;
+
+function fmtTime(ts) { return ts ? ts.replace('T', ' ').slice(0, 16) : '—'; }
+
+(async () => {
+  document.getElementById('title').textContent = label ? '「' + label + '」的问题' : '类目问题';
+  if (!label) {
+    document.getElementById('rows').innerHTML =
+      '<tr><td colspan="6" class="muted">没指定类目;回主题分布页点一个类目名。</td></tr>';
+    return;
+  }
+  // 顶部类目切换:按问题量排开,当前类高亮
+  try {
+    const d = await AC.getJSON('/api/topics/distribution');
+    const tabs = document.getElementById('tabs');
+    [...d.classes].sort((a, b) => b.count - a.count).forEach(c => {
+      const btn = AC.el('button', {
+        class: c.label === label ? 'on' : '',
+        text: c.label + ' ' + c.count,
+        onclick: () => { location.href = '/topics/questions?label=' + encodeURIComponent(c.label); },
+      });
+      tabs.appendChild(btn);
+    });
+  } catch (e) { /* 分布读不到不影响列表 */ }
+
+  let body;
+  try {
+    body = await AC.getJSON('/api/topics/questions?label=' + encodeURIComponent(label)
+      + '&page=' + page + '&size=' + size);
+  } catch (e) {
+    document.getElementById('rows').innerHTML =
+      '<tr><td colspan="6" class="muted">读取失败:' + e.message + '</td></tr>';
+    return;
+  }
+  const rows = document.getElementById('rows');
+  rows.innerHTML = '';
+  if (!body.items.length) {
+    rows.innerHTML = '<tr><td colspan="6" class="muted">这一类下还没有问题。</td></tr>';
+  }
+  body.items.forEach(it => {
+    const q = AC.el('td', {}, [
+      AC.el('div', { class: 'qtext', text: it.text }),
+      it.raw_question && it.raw_question !== it.text
+        ? AC.el('div', { class: 'qraw', text: '原话:' + it.raw_question }) : '',
+    ]);
+    const labels = AC.el('td', {}, it.labels.map(l =>
+      AC.el('span', { class: 'chip', text: l })));
+    rows.appendChild(AC.el('tr', {}, [
+      q, labels,
+      AC.el('td', { class: 'mono', text: it.source || '—' }),
+      AC.el('td', { class: 'mono', text: it.occurrence_count ? '×' + it.occurrence_count : '—' }),
+      AC.el('td', { text: it.review_status || '—' }),
+      AC.el('td', { class: 'mono', text: fmtTime(it.classified_at) }),
+    ]));
+  });
+
+  const pager = document.getElementById('pager');
+  const mk = (p, text, off) => off
+    ? AC.el('span', { class: 'off', text })
+    : AC.el('a', { href: '/topics/questions?label=' + encodeURIComponent(label) + '&page=' + p,
+                   text });
+  pager.appendChild(mk(body.page - 1, '← 上一页', body.page <= 1));
+  pager.appendChild(AC.el('span', { class: 'muted',
+    text: '第 ' + body.page + ' / ' + body.pages + ' 页,共 ' + body.total + ' 条' }));
+  pager.appendChild(mk(body.page + 1, '下一页 →', body.page >= body.pages));
+})();
+</script>
+</body>
+</html>
