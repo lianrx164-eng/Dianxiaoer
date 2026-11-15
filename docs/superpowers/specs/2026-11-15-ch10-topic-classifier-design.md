@@ -1,6 +1,6 @@
 # ch10 · 模型微调:多标签主题分类器(RoBERTa-wwm-ext 全参微调)设计
 
-> 对齐课程 mewhelp-course/ch10-fine-tuning/README.md,不漏功能点。
+> 对齐课程 dianxiaoer-course/ch10-fine-tuning/README.md,不漏功能点。
 > 目标:把飞轮攒下的低置信度问题按 17 类主题批量归类,喂给飞轮后台看各主题分布,决定先补哪块知识。
 
 ## 1. 背景与目标
@@ -196,7 +196,7 @@ ch09 数据飞轮把 bot 没答好的问题攒进 `low_confidence_questions`(现
 
 1. **运行环境**:Windows 11 + RTX 3070 Ti Laptop(8 GB 显存),不是 Apple Silicon。§4 设备自适应改为 `cuda → cpu`;不涉及 MPS 及其回退开关;8 GB 显存下 `batch=16 / max_length=128` 可行。
 2. **作业运行器已存在**:ch09 已落 `app/core/jobs.py`(`JobSpec: name/target/heavy`,argv 由 `make <target>` 拼)与 `app/api/jobs.py`。本章不新建这两个文件,而是往 `JOBS` 注册表追加 ch10 目标,并给 `JobSpec` 补 `title`/`needs` 字段供页面按钮提示;验收 API 新增 `app/api/acceptance.py`。
-3. **测试基建**:会话夹具名是 `db_session_factory`(不是 `db_session_maker`);测试库为 `mewhelp_test`(conftest 自建);`_DDL_FILES` 追加 `sql/ch10-ddl.sql`,`_TABLES` 首位插 `topic_classifications`(它 FK 指向 `low_confidence_questions`,须先删)。
+3. **测试基建**:会话夹具名是 `db_session_factory`(不是 `db_session_maker`);测试库为 `dianxiaoer_test`(conftest 自建);`_DDL_FILES` 追加 `sql/ch10-ddl.sql`,`_TABLES` 首位插 `topic_classifications`(它 FK 指向 `low_confidence_questions`,须先删)。
 4. **实池规模**:当前 `low_confidence_questions` 共 28 行、其中 20 行已归并;`review_queue` 9 行。后果:①旁路批量归类可归的真实样本上限为 20 条,§10 验收 2 的「一批真实问题」即此量级;②语料中模拟占比 >98%(§12 已列为风险,此处给出实数)。
 5. **DDL 已定稿**:用户 2026-11-15 修正后落 `sql/ch10-ddl.sql`;`topic_classifications` 带 `UNIQUE KEY uk_question_id`,一条问题只归一次,幂等由库兜底;需重归时先删对应行。
 6. **分支**:按仓库惯例开 `ch10-topic-classifier`;合并 main 等用户明说(不采用「直接在 main 开发」)。

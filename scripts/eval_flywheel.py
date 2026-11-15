@@ -3,7 +3,7 @@
 D 桶拒答判定与线上一致:置信度闸(evidence_confidence) + 自评闸。
 
 运行:make eval-flywheel(TRIGGER=手动|定时,默认手动)。cron 示例:
-  0 6 * * * cd /path/to/mewhelp && make eval-flywheel TRIGGER=定时 >> log/eval.log 2>&1
+  0 6 * * * cd /path/to/dianxiaoer && make eval-flywheel TRIGGER=定时 >> log/eval.log 2>&1
 趋势:读最近 10 轮,对比上一轮涨跌;任何指标下滑标 ⚠。
 产物:data/ch09/reports/eval_trend.txt
 """

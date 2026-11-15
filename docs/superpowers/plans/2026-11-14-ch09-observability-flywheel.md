@@ -79,7 +79,7 @@
 
 - [ ] **Step 5: 跑测试 + 全量零回归 + 应用 DDL + Commit**
   `uv run pytest tests/db/test_ch09_flywheel_tables.py -q` → PASS;`uv run pytest -q` → 零回归。
-  开发库:`"C:/Program Files/MySQL/MySQL Server 8.0/bin/mysql.exe" --default-character-set=utf8mb4 -uroot -p123456 mewhelp_ch02 < sql/ch09-ddl.sql`。
+  开发库:`"C:/Program Files/MySQL/MySQL Server 8.0/bin/mysql.exe" --default-character-set=utf8mb4 -uroot -p123456 dianxiaoer_ch02 < sql/ch09-ddl.sql`。
   ```bash
   git add sql/ch09-ddl.sql app/db/models.py app/db/repository.py tests/conftest.py tests/db/test_ch09_flywheel_tables.py
   git commit -m "feat(ch09): flywheel foundation - review_queue/eval_runs ORM and repository methods"

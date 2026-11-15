@@ -14,7 +14,7 @@
 
 ## Global Constraints
 
-- 对齐 spec:`docs/superpowers/specs/2026-11-15-ch10-topic-classifier-design.md`(正文 + §13 基线校正 + §14 审阅定稿);对齐课程 `mewhelp-course/ch10-fine-tuning/README.md`,不漏功能点。
+- 对齐 spec:`docs/superpowers/specs/2026-11-15-ch10-topic-classifier-design.md`(正文 + §13 基线校正 + §14 审阅定稿);对齐课程 `dianxiaoer-course/ch10-fine-tuning/README.md`,不漏功能点。
 - 技术选型定死:RoBERTa-wwm-ext(`hfl/chinese-roberta-wwm-ext`)全参微调、不用 LoRA/QLoRA;ONNX + 独立 FastAPI 服务;实现走不通**停下来问用户,不许自行换方案**。
 - 涉及库 API(transformers/torch/onnxruntime/FastAPI/SQLAlchemy/LangChain)先 Context7 查最新文档再动手。已查证并写死进本计划:TrainingArguments 用 `eval_strategy`(不是 evaluation_strategy);Trainer 用 `processing_class=`(不是 tokenizer=);`load_best_model_at_end=True` 要求 save/eval strategy 一致;EarlyStoppingCallback 要求设 `metric_for_best_model`;torch 2.9+ `torch.onnx.export` 默认 `dynamo=True`,而 TorchScript 导出器(`dynamo=False`)自 2.9 起已标废弃——**本章优先 `dynamo=True` + `dynamic_shapes`,`dynamo=False` 只作退路**。
 - 每完成一个任务:在 `dev-notes/ch10.md` 追记一段(用户关键原话/关键产出/纠偏/翻车返工),**不许收尾时一次性补记**;`dev-notes/ch10.md` 随仓库提交(ch09 起 dev-notes 已入库)。
@@ -25,7 +25,7 @@
 - 分支:`ch10-topic-classifier`;合并 main 等用户明说。
 - 训练/推理产物不进 git:`.gitignore` 加 `data/ch10/*` + `!data/ch10/reports`;黄金样例落 `scripts/ch10/golden_samples.jsonl` 进 git。
 - 类目表全系统唯一:任何脚本/服务/前端要类目一律 `from app.core.taxonomy import ...`,不许抄第二份。
-- 测试命令:`PYTHONPATH=. uv run pytest tests/... -v`(需本地 MySQL,测试库 `mewhelp_test` 由 conftest 自建);LLM 相关脚本需上游可用(`.env` 里填好 `CHAT_*` 三项)。
+- 测试命令:`PYTHONPATH=. uv run pytest tests/... -v`(需本地 MySQL,测试库 `dianxiaoer_test` 由 conftest 自建);LLM 相关脚本需上游可用(`.env` 里填好 `CHAT_*` 三项)。
 
 ## Review Focus
 
@@ -218,7 +218,7 @@ git commit -m "feat(ch10): 权威类目表 taxonomy.py(17 类,课程 README 原�
 
 - [ ] **Step 1: 开发库应用 DDL**
 
-Run: `mysql -uroot -proot -h127.0.0.1 mewhelp < sql/ch10-ddl.sql && mysql -uroot -proot -h127.0.0.1 mewhelp -e "SHOW CREATE TABLE topic_classifications\G" | head -5`
+Run: `mysql -uroot -proot -h127.0.0.1 dianxiaoer < sql/ch10-ddl.sql && mysql -uroot -proot -h127.0.0.1 dianxiaoer -e "SHOW CREATE TABLE topic_classifications\G" | head -5`
 Expected: 表结构输出
 
 - [ ] **Step 2: conftest.py 注册 DDL 与清表顺序**
@@ -1406,7 +1406,7 @@ from app.core.taxonomy import TOPIC_NAMES
 
 DIR = pathlib.Path("data/ch10/onnx")
 
-app = FastAPI(title="mewhelp ch10 topic classifier")
+app = FastAPI(title="dianxiaoer ch10 topic classifier")
 _sess = ort.InferenceSession(str(DIR / "model.onnx"), providers=["CPUExecutionProvider"])
 _tok = Tokenizer.from_file(str(DIR / "tokenizer.json"))
 _tok.enable_truncation(max_length=128)
@@ -1500,7 +1500,7 @@ git commit -m "feat(ch10): ONNX 推理服务 :8110(/classify 批量 + /healthz)"
 """ch10 旁路批处理:低置信度问题攒够一批,整批喂分类器归一次类,结果写 topic_classifications。
 实时对话主链路不调它。运行:make classify-pool(需 mysql + 分类器服务 :8110)。
 幂等:已归类的行(LEFT JOIN 命中)不重复归。定时跑 cron 示例:
-  0 3 * * * cd /path/to/mewhelp && make classify-pool >> log/classify-pool.log 2>&1"""
+  0 3 * * * cd /path/to/dianxiaoer && make classify-pool >> log/classify-pool.log 2>&1"""
 import argparse
 import asyncio
 
@@ -1555,7 +1555,7 @@ classify-pool:  ## ch10 旁路批量归类:攒够一批归一次,写 topic_class
 Run:
 ```bash
 make classify-pool
-mysql -uroot -proot -h127.0.0.1 mewhelp -e "SELECT COUNT(*) FROM topic_classifications;"
+mysql -uroot -proot -h127.0.0.1 dianxiaoer -e "SELECT COUNT(*) FROM topic_classifications;"
 make classify-pool   # 第二遍:应报「池里没有待归类问题」,行数不变
 ```
 Expected: 首遍写入约 70 条(全池);二遍幂等不重写
@@ -1929,7 +1929,7 @@ Expected: 全 passed
 ### 15.0 全局
 
 - 分支:`ch10-topic-classifier`(从 main 切),合并等用户明说。
-- **本机没有 `mysql` CLI**:原文所有 `mysql -uroot ...` 的步骤改用 Python 跑(写法见 15.2);测试库 `mewhelp_test` 由 conftest 自建,不需要手动建。
+- **本机没有 `mysql` CLI**:原文所有 `mysql -uroot ...` 的步骤改用 Python 跑(写法见 15.2);测试库 `dianxiaoer_test` 由 conftest 自建,不需要手动建。
 - 会话夹具是 **`db_session_factory`**(async fixture,产出 `async_sessionmaker`),不是 `db_session_maker`;清理夹具是 `db_clean`。测试里统一写 `async with db_session_factory() as s:`。
 - 仓储层新函数内部用 **`db.async_session()`**(模块属性,便于测试 monkeypatch),照 `app/db/repository.py` 现有写法,不要裸用 `async_session`。
 - 测试命令统一 `PYTHONPATH=. uv run pytest ...`。

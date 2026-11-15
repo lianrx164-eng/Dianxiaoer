@@ -2,7 +2,7 @@
 
 实时对话主链路不调它。运行:make classify-pool(需 mysql + 分类器服务 :8110)。
 幂等:已归类的行(LEFT JOIN 命中)不重复归。定时跑 cron 示例:
-  0 3 * * * cd /path/to/mewhelp && make classify-pool >> log/classify-pool.log 2>&1
+  0 3 * * * cd /path/to/dianxiaoer && make classify-pool >> log/classify-pool.log 2>&1
 """
 import argparse
 import asyncio

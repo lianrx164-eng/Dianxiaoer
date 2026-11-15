@@ -238,7 +238,7 @@ MAX_AGENT_STEPS=3           TOOL_RESULT_MAX_TOKENS=1200  RERANK_TOP_K=5
 
 ## 13. 测试与验证
 
-- **代码走 TDD**(测试库 `mewhelp_test` 惯例):
+- **代码走 TDD**(测试库 `dianxiaoer_test` 惯例):
   - `context_budget`:演示数值 5650/3954/1695;只调窗口时 50/34/15 且自检报警;默认配置 30000/20999/9000;`system_prompt_tokens`/`tool_schema_tokens` 与当前 `AGENT_SYSTEM`/工具 schema 的实测值一致(提示词或工具变了,这条先红);
   - `memory`:`split_layers`(边界命中/空层 2/旧会话无锚点)、`degrade_layer1`(整轮移动/单轮超预算/边界不越过 `summary_upto`)、`render_layer2`(用户全留、AI 前 40 字、大块 tool 一行)、层 2 token 预算裁剪;
   - `summarizer`:`compute_boundary`(=layer1_from)、触发/跳过/防抖、`run_summary` 追加段 + 投影 + 原子更新、旧段不变、失败不写;

@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 _enabled_impl = False
 _tracer_provider = None
 _tracer = None
-_root_span: ContextVar = ContextVar("mewhelp_root_span", default=None)
+_root_span: ContextVar = ContextVar("dianxiaoer_root_span", default=None)
 
 
 def phoenix_enabled() -> bool:
@@ -35,7 +35,7 @@ def _instrument() -> None:
         batch=True,
     )
     LangChainInstrumentor().instrument(tracer_provider=_tracer_provider)
-    _tracer = trace.get_tracer("mewhelp")
+    _tracer = trace.get_tracer("dianxiaoer")
     _enabled_impl = True
 
 

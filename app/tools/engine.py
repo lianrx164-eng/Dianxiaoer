@@ -58,7 +58,7 @@ def _summarize(content: str) -> str:
 # ch09:工具自报的内部快照(如 query_faq)由引擎剥走,不透给模型;
 # agent_tools 在执行完工具后读走写进 retrieved_snapshot。
 LAST_TOOL_SNAPSHOT: contextvars.ContextVar[list] = contextvars.ContextVar(
-    "mewhelp_tool_snapshot", default=[])
+    "dianxiaoer_tool_snapshot", default=[])
 
 
 def _flatten_content(result):

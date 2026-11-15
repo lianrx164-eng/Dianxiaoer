@@ -11,8 +11,8 @@ class Settings(BaseSettings):
     # 提取任务的上游思考开关。默认 None = 不发送该参数,保证换上游只改 .env;
     # DeepSeek 需设 disabled(思考模式不支持强制 tool_choice)
     extract_thinking: str | None = None
-    database_url: str = "mysql+asyncmy://root:root@localhost:3306/mewhelp_ch02?charset=utf8mb4"
-    test_database_url: str = "mysql+asyncmy://root:root@localhost:3306/mewhelp_test?charset=utf8mb4"
+    database_url: str = "mysql+asyncmy://root:root@localhost:3306/dianxiaoer_ch02?charset=utf8mb4"
+    test_database_url: str = "mysql+asyncmy://root:root@localhost:3306/dianxiaoer_test?charset=utf8mb4"
 
     # 嵌入:阿里云百炼系列,OpenAI 兼容网关;key 同聊天一样不给默认值
     embed_base_url: str = "https://maas.qianwenaiapi.com/compatible-mode/v1"
@@ -70,7 +70,7 @@ class Settings(BaseSettings):
     # ch09 可观测(Phoenix 本地自部署;PHOENIX_ENDPOINT 为空则完全不启用)
     phoenix_endpoint: str = ""      # 如 http://localhost:6006/v1/traces
     phoenix_base_url: str = "http://localhost:6006"
-    phoenix_project: str = "mewhelp"
+    phoenix_project: str = "dianxiaoer"
 
     # ch09 置信度闸(正式版):阈值由 make calibrate-confidence 在 ch04 评估集上校准后回填
     # 2026-11-14 校准:推荐 0.59(Youden J=0.859,D 桶 9 条因上游报错未计入)

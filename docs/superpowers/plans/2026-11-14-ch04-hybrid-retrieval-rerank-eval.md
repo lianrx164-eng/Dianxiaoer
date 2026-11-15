@@ -1479,7 +1479,7 @@ PYTHONPATH=. uv run python -c "from app.kb import milvus_client as m; print('Mil
 ```
 Expected: count 与 MySQL `knowledge_chunks` done 数一致。
 
-> 本机 MySQL 是本地 8.0(root/123456),不是 docker 容器;`make kb-reset` 现有实现走脚本/API,不要用 `docker exec -i mewhelp-mysql`。Lite 对数据目录进程级独占:CLI 建库前先停掉 8001/8002 的服务进程,或改走作业 API。
+> 本机 MySQL 是本地 8.0(root/123456),不是 docker 容器;`make kb-reset` 现有实现走脚本/API,不要用 `docker exec -i dianxiaoer-mysql`。Lite 对数据目录进程级独占:CLI 建库前先停掉 8001/8002 的服务进程,或改走作业 API。
 
 - [ ] **Step 4: 校准评估集 expect_section / expect_points**
 
@@ -1600,7 +1600,7 @@ make dev   # 8002 应用(先停掉占用 Lite 锁的旧进程)
 - **验收3**(引用可点):问「邮费是多少」→ 答案带引用角标 → 点击看到来源 section_path + 原文。截图 `dev-notes/ch04-acceptance3.png`。
 - **验收4**(拒答+落池):问「你们卖火星车吗」→ 明确拒答 → 查库:
 ```bash
-docker exec -i mewhelp-mysql mysql -uroot -proot mewhelp -e "SELECT id,source,LEFT(raw_question,20),LEFT(reason,30) FROM low_confidence_questions ORDER BY id DESC LIMIT 5;"
+docker exec -i dianxiaoer-mysql mysql -uroot -proot dianxiaoer -e "SELECT id,source,LEFT(raw_question,20),LEFT(reason,30) FROM low_confidence_questions ORDER BY id DESC LIMIT 5;"
 ```
 Expected: 有新记录,source ∈ {retrieval_low_conf, self_check}。截图 `dev-notes/ch04-acceptance4.png`。
 - **验收5**(满意度反馈):任一回答左下角有 👍/👎 → 点击其一 → 点亮所选 + 显示「已反馈」+ 两键锁定。截图 `dev-notes/ch04-acceptance5.png`。

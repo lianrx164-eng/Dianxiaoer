@@ -187,7 +187,7 @@ demo_ticket_delay_seconds: float = 0.0
 - `sql/ch08-ddl.sql`:桌面 `ch_08.sql` 原样复制(无 ASCII `;` 注释问题,已核)。
 - `ToolAuditLog` 模型对齐 DDL,无外键;`repository.insert_tool_audit(...)` 尾部追加。
 - `tests/conftest.py`:`_DDL_FILES` 加 ch08;`_TABLES` 首部加 `tool_audit_logs`。
-- dev 库用 `docker exec -i mewhelp-mysql ... < sql/ch08-ddl.sql` 应用。
+- dev 库用 `docker exec -i dianxiaoer-mysql ... < sql/ch08-ddl.sql` 应用。
 
 ### 4.10 ch07 预算常量校准(本章新增任务)
 

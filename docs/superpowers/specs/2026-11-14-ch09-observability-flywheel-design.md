@@ -1,6 +1,6 @@
 # Ch09 设计:可观测性与数据飞轮(Langfuse 接入 + Cost Control + 三入口问题池 + 标准化查重待审 + 人工审核写回 + 评估趋势)
 
-> 对齐课程文档 `mewhelp-course/ch09-observability-flywheel/README.md`:前半装可观测性(Langfuse 调用树、按意图算 token 账、评估趋势线),后半装数据飞轮(三入口低置信度问题池 → 标准化查重 → 人工审核三道闸 → 写回知识库闭环)。
+> 对齐课程文档 `dianxiaoer-course/ch09-observability-flywheel/README.md`:前半装可观测性(Langfuse 调用树、按意图算 token 账、评估趋势线),后半装数据飞轮(三入口低置信度问题池 → 标准化查重 → 人工审核三道闸 → 写回知识库闭环)。
 
 ## 1. 背景与目标
 
@@ -294,7 +294,7 @@ approve 时:以 `normalized_question` + `approved_answer` 构造一条 QA 知识
 | 校准可答桶 = A/B/C | 评估集另含 `E_multi`(多跳可答) | 可答桶 = A/B/C/E,应拒桶 = D |
 | 子任务提交信息为中文 | 全局规矩:commit message 简洁英文 | 全部用英文 `feat(ch09): ...` |
 | Langfuse 环境 | 本机原先无 Docker,用户选择安装 Docker Desktop | 服务器锁定 v3 镜像;SDK 锁 `langfuse>=3.12,<4`(v4 移除了 `update_current_trace`) |
-| MySQL 走 docker exec | 本机 MySQL 8.0 本地安装,开发库 `mewhelp_ch02` | DDL 用 `mysql.exe` 应用,不依赖容器 |
+| MySQL 走 docker exec | 本机 MySQL 8.0 本地安装,开发库 `dianxiaoer_ch02` | DDL 用 `mysql.exe` 应用,不依赖容器 |
 
 Langfuse 环境变量名按 SDK v3 文档为 `LANGFUSE_HOST`(SDK 3.15 同时接受 `LANGFUSE_BASE_URL`);仓库 settings 字段名沿用 `langfuse_base_url`(语义等价),构造时显式传 `base_url=`(`host` 在 3.15 已是废弃别名)。
 

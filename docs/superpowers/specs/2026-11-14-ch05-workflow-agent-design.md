@@ -1,7 +1,7 @@
 # Ch05 设计:Workflow + Agent 混合架构(LangGraph 骨架)
 
 > 状态:定稿(用户桌面 Spec 已通过 brainstorm;本文件按仓库现状修订)
-> 章节权威来源:`mewhelp-course/ch05-workflow-agent/README.md`
+> 章节权威来源:`dianxiaoer-course/ch05-workflow-agent/README.md`
 > 上游选型定死:LangGraph(图编排 + State + checkpointer);前端沿用原生 HTML/CSS/JS,仅加两个动作按钮。
 
 ## 1. 背景与目标

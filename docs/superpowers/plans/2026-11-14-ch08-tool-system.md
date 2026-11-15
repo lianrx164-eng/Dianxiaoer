@@ -18,7 +18,7 @@
 - JSON 序列化一律 `ensure_ascii=False`;审计写失败不许反拦工具执行;写操作(`create_ticket`)恒不自动重试。
 - 每任务完成即 commit,并追记 `dev-notes/ch08.md`(不许收尾补记);commit message 用简洁英文,结尾带 `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`。
 - 红线:修改 `.env.example` 前单独向用户确认;不 push、不 rebase、不删分支。
-- 测试命令 `uv run pytest <path> -v`,全量 `make test`;测试连真 MySQL 测试库(docker `mewhelp-mysql` 需在跑)。
+- 测试命令 `uv run pytest <path> -v`,全量 `make test`;测试连真 MySQL 测试库(docker `dianxiaoer-mysql` 需在跑)。
 - ch05 投诉按钮建单路径(`complaint_reply` + `POST /api/actions/create-ticket`)一行不动。
 - 前端 Task 8 走 Vibe Coding,不套 TDD;prompt 改动用标注样例(Task 9)验证。
 - ch08 会改 `AGENT_SYSTEM` 与工具清单,ch07 预算常量与 `tests/test_context_budget.py` 必须跟着重测(见 Task 2/5/6),ch07 历史演示数字不再复现。
@@ -195,8 +195,8 @@ Run: `uv run pytest tests/db/test_tool_audit.py -v`
 Expected: 2 passed。
 
 ```bash
-docker exec -i mewhelp-mysql mysql --default-character-set=utf8mb4 -uroot -proot mewhelp < sql/ch08-ddl.sql
-docker exec -i mewhelp-mysql mysql -uroot -proot mewhelp -e "DESC tool_audit_logs;"
+docker exec -i dianxiaoer-mysql mysql --default-character-set=utf8mb4 -uroot -proot dianxiaoer < sql/ch08-ddl.sql
+docker exec -i dianxiaoer-mysql mysql -uroot -proot dianxiaoer -e "DESC tool_audit_logs;"
 ```
 
 Expected: 13 列。

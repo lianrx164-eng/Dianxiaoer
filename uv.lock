@@ -2199,7 +2199,7 @@ wheels = [
 ]
 
 [[package]]
-name = "mewhelp"
+name = "dianxiaoer"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
@@ -2293,7 +2293,7 @@ ml = [
     { name = "onnxscript", specifier = ">=0.3" },
     { name = "scikit-learn", specifier = ">=1.5" },
     { name = "tokenizers", specifier = ">=0.20" },
-    { name = "torch", specifier = ">=2.6", index = "https://download.pytorch.org/whl/cu128", conflict = { package = "mewhelp", group = "ml" } },
+    { name = "torch", specifier = ">=2.6", index = "https://download.pytorch.org/whl/cu128", conflict = { package = "dianxiaoer", group = "ml" } },
     { name = "transformers", specifier = ">=5.0" },
 ]
 serve = [

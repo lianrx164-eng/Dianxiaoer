@@ -1,14 +1,14 @@
 services:
   mysql:
     image: mysql:8.0
-    container_name: mewhelp-mysql
+    container_name: dianxiaoer-mysql
     environment:
       MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: mewhelp
+      MYSQL_DATABASE: dianxiaoer
     ports:
       - "3306:3306"
     volumes:
-      - mewhelp-mysql-data:/var/lib/mysql
+      - dianxiaoer-mysql-data:/var/lib/mysql
       - ./sql:/docker-entrypoint-initdb.d:ro   # 首启按文件名序执行 ch02-ddl.sql → ch02-seed.sql
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-proot"]
@@ -17,4 +17,4 @@ services:
       retries: 20
 
 volumes:
-  mewhelp-mysql-data:
+  dianxiaoer-mysql-data:

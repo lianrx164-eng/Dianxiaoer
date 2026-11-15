@@ -1,6 +1,12 @@
-# MewHelp — 电商智能客服(Ch01:纯对话)
+# 店小二 Dianxiaoer · 电商售后智能客服
 
-FastAPI + LangChain,模型上游直连。
+在容错为零的业务里,让大模型可靠地干活。
+
+用户问退换货政策、催物流、要退款,系统先判断意图:该查知识库的查知识库,该调订单接口的调订单接口,判不准的稳妥转人工。架构是确定性 Workflow 与 Agent 的混合——业务铁律用代码定死,开放推理才交给模型。
+
+FastAPI + LangGraph + LangChain,主链路 SSE 流式;MySQL 存业务数据,Milvus 存知识库,Phoenix 做可观测,ch10 用微调的 RoBERTa 做低置信度问题的主题归类。
+
+> 下面的章节是按开发顺序留下的完整记录,每一章都写着当时的验收标准和踩过的坑。
 
 ## 启动
 
@@ -50,11 +56,11 @@ PY
 
 ### 数据库(本机 MySQL 8.0;仓库也带 docker-compose.yml)
 
-本机开发用已有 MySQL 服务,库名 `mewhelp_ch02`(隔离,不动已有数据):
+本机开发用已有 MySQL 服务,库名 `dianxiaoer_ch02`(隔离,不动已有数据):
 
-    mysql -uroot -p --default-character-set=utf8mb4 -e "CREATE DATABASE IF NOT EXISTS mewhelp_ch02 CHARACTER SET utf8mb4"
-    mysql -uroot -p --default-character-set=utf8mb4 mewhelp_ch02 < sql/ch02-ddl.sql
-    # .env 里 DATABASE_URL / TEST_DATABASE_URL 指向 localhost:3306/mewhelp_ch02 与 mewhelp_test
+    mysql -uroot -p --default-character-set=utf8mb4 -e "CREATE DATABASE IF NOT EXISTS dianxiaoer_ch02 CHARACTER SET utf8mb4"
+    mysql -uroot -p --default-character-set=utf8mb4 dianxiaoer_ch02 < sql/ch02-ddl.sql
+    # .env 里 DATABASE_URL / TEST_DATABASE_URL 指向 localhost:3306/dianxiaoer_ch02 与 dianxiaoer_test
     uv run python scripts/seed_db.py   # faq 种子,幂等(也可 make seed)
 
 有 Docker 的机器:`docker compose up -d` 首启按序执行 `sql/ch02-ddl.sql`、`sql/ch02-seed.sql`。
@@ -74,7 +80,7 @@ PY
 
 ### 测试
 
-    uv run pytest -v   # 需 MySQL 在跑;conftest 自动重建 mewhelp_test 库并从 sql/ch02-ddl.sql 建表
+    uv run pytest -v   # 需 MySQL 在跑;conftest 自动重建 dianxiaoer_test 库并从 sql/ch02-ddl.sql 建表
 
 ---
 
@@ -90,9 +96,9 @@ PY
     EMBED_MODEL=text-embedding-v4
     EMBED_API_KEY=sk-xxx
 
-数据库:在已建好的 `mewhelp_ch02` 库上补 ch03 两张表:
+数据库:在已建好的 `dianxiaoer_ch02` 库上补 ch03 两张表:
 
-    mysql -uroot -p --default-character-set=utf8mb4 mewhelp_ch02 < sql/ch03-ddl.sql
+    mysql -uroot -p --default-character-set=utf8mb4 dianxiaoer_ch02 < sql/ch03-ddl.sql
 
 脚本方式(无 mysql CLI 时):用 SQLAlchemy 执行 `sql/ch03-ddl.sql`,语句切分复用 `app/db/sql_script.py`。
 
@@ -124,7 +130,7 @@ PY
 
 ### 测试
 
-    uv run pytest -q   # 需 MySQL 在跑;conftest 从 ch02/ch03 DDL 重建 mewhelp_test,单测不打真实嵌入 API
+    uv run pytest -q   # 需 MySQL 在跑;conftest 从 ch02/ch03 DDL 重建 dianxiaoer_test,单测不打真实嵌入 API
 
 ---
 
@@ -140,9 +146,9 @@ PY
     RERANK_MODEL=qwen3-rerank
     # RERANK_API_KEY=sk-xxx
 
-在 `mewhelp_ch02` 上补 ch04 两张表:
+在 `dianxiaoer_ch02` 上补 ch04 两张表:
 
-    mysql -uroot -p --default-character-set=utf8mb4 mewhelp_ch02 < sql/ch04-ddl.sql
+    mysql -uroot -p --default-character-set=utf8mb4 dianxiaoer_ch02 < sql/ch04-ddl.sql
 
 ### 命令
 
