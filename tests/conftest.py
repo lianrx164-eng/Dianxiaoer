@@ -23,9 +23,11 @@ _DDL_FILES = [
     pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch07-ddl.sql",
     pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch08-ddl.sql",
     pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch09-ddl.sql",
+    pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch10-ddl.sql",
 ]
 # 删除顺序:先子表后父表;knowledge_chunks 自引用 FK 靠 FOREIGN_KEY_CHECKS=0 兜
 _TABLES = [
+    "topic_classifications",
     "tool_audit_logs", "conversation_summaries", "faith_cases",
     "low_confidence_questions", "review_queue", "eval_runs",
     "messages", "tickets", "conversations",
