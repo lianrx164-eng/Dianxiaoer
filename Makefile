@@ -162,7 +162,7 @@ ch10-dataset:  ## 分层划分 80/10/10 + 训练集增强(需上游可用)
 	PYTHONPATH=. uv run python scripts/ch10/build_dataset.py
 
 ch10-train:  ## RoBERTa-wwm-ext 全参微调(cuda→cpu 自适应,重依赖走 ml 组)
-	PYTHONPATH=. uv run --group ml python scripts/ch10/train.py
+	HF_ENDPOINT=$(or $(HF_ENDPOINT),https://hf-mirror.com) PYTHONPATH=. uv run --group ml python scripts/ch10/train.py
 
 ch10-eval:  ## 测试集评测:每类 P/R/F1 + 混淆矩阵 + 容错红线 + 判错样本导出
 	PYTHONPATH=. uv run --group ml python scripts/ch10/evaluate.py
