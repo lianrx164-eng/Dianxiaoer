@@ -11,7 +11,10 @@ window.AC = (function () {
         else if (v !== undefined && v !== null) node.setAttribute(k, v);
       }
     }
-    (children || []).forEach((c) => node.appendChild(c));
+    (children || []).forEach((c) => {
+      if (c === null || c === undefined || c === '') return;   // 条件子节点常写 `cond ? el() : ''`
+      node.appendChild(c);
+    });
     return node;
   }
 

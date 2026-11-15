@@ -14,6 +14,10 @@
   .samples li { margin: 2px 0; }
   .more { font-size: 11.5px; margin-left: 104px; }
   .more a { color: #b45309; }
+  @media (max-width: 720px) {
+    .bar-row { grid-template-columns: 72px minmax(0, 1fr) 44px; }
+    .samples, .more { margin-left: 0; }
+  }
 </style>
 </head>
 <body class="admin-page">
