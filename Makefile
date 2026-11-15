@@ -157,3 +157,30 @@ ch10-golden:  ## 预标 prompt 黄金样例验证(通过率 ≥ 80% 才放行批
 
 ch10-corpus:  ## 语料流水线:捞池→清洗→预标→模拟补足→导出人工抽审(需 mysql + 上游可用)
 	PYTHONPATH=. uv run python scripts/ch10/build_corpus.py
+
+ch10-dataset:  ## 分层划分 80/10/10 + 训练集增强(需上游可用)
+	PYTHONPATH=. uv run python scripts/ch10/build_dataset.py
+
+ch10-train:  ## RoBERTa-wwm-ext 全参微调(cuda→cpu 自适应,重依赖走 ml 组)
+	PYTHONPATH=. uv run --group ml python scripts/ch10/train.py
+
+ch10-eval:  ## 测试集评测:每类 P/R/F1 + 混淆矩阵 + 容错红线 + 判错样本导出
+	PYTHONPATH=. uv run --group ml python scripts/ch10/evaluate.py
+
+ch10-export:  ## 导出 ONNX 并校验与 torch 预测完全一致
+	PYTHONPATH=. uv run --group ml python scripts/ch10/export_onnx.py
+
+classifier-up:  ## ch10 推理服务 :8110(ONNX 轻运行时)
+	@mkdir -p log data
+	@PYTHONPATH=. nohup uv run --group ml python scripts/ch10/serve.py > log/classifier.log 2>&1 & echo $$! > data/classifier.pid
+	@sleep 2 && curl -sf http://127.0.0.1:8110/healthz >/dev/null && echo "分类器服务已拉起: :8110(pid 见 data/classifier.pid)" || echo "启动失败,看 log/classifier.log"
+
+classifier-down:
+	-@kill `cat data/classifier.pid 2>/dev/null` 2>/dev/null; rm -f data/classifier.pid
+	@echo "分类器服务已停"
+
+classify-pool:  ## ch10 旁路批量归类:攒够一批归一次,写 topic_classifications(需 :8110)
+	PYTHONPATH=. uv run python scripts/ch10/classify_pool.py $(if $(FORCE),--force,)
+
+ch10-threshold-scan:  ## ch10 阈值扫描重演:九候选线各算一遍 micro-F1(需 :8110)
+	PYTHONPATH=. uv run python scripts/ch10/scan_threshold_replay.py

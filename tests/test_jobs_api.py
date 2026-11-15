@@ -61,6 +61,19 @@ def test_every_job_target_exists_in_makefile():
         assert f"{spec.target}:" in text, spec
 
 
+async def test_force_job_argv_carries_make_vars(client, monkeypatch):
+    captured = {}
+
+    def fake_popen(argv, **kw):
+        captured["argv"] = argv
+        return FakeProc(argv, **kw)
+
+    monkeypatch.setattr(jobs_core.subprocess, "Popen", fake_popen)
+    r = await client.post("/api/jobs/classify-pool-force")
+    assert r.status_code == 200
+    assert captured["argv"] == ["make", "classify-pool", "FORCE=1"]
+
+
 def test_concurrent_start_only_one_wins(monkeypatch):
     monkeypatch.setattr(
         jobs_core.subprocess, "Popen", lambda argv, **kw: FakeProc(argv, **kw)

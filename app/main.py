@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.actions import router as actions_router
+from app.api.acceptance import router as acceptance_router
 from app.api.admin import router as admin_router
 from app.api.agent import router as agent_router
 from app.api.chat import router as chat_router
@@ -61,6 +62,7 @@ app.include_router(feedback_router)
 app.include_router(review_router)
 app.include_router(observability_router)
 app.include_router(topics_router)
+app.include_router(acceptance_router)
 app.include_router(actions_router)
 app.include_router(conversations_router)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

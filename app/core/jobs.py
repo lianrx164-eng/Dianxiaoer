@@ -18,6 +18,9 @@ class JobSpec:
     name: str
     target: str
     heavy: bool = False
+    title: str = ""          # 页面按钮上的一行说明
+    needs: str = ""          # 前置条件提示(如「需 :8110」)
+    args: tuple[str, ...] = ()   # 追加给 make 的参数(如 FORCE=1)
 
 
 JOBS: dict[str, JobSpec] = {
@@ -31,6 +34,24 @@ JOBS: dict[str, JobSpec] = {
         JobSpec("cost-report", "cost-report"),
         JobSpec("eval-flywheel", "eval-flywheel", heavy=True),
         JobSpec("calibrate-confidence", "calibrate-confidence", heavy=True),
+        # ch10 主题分类器:数据→训练→评测→导出→旁路归类
+        JobSpec("ch10-golden", "ch10-golden", title="预标黄金样例闸", needs="上游可用"),
+        JobSpec("ch10-corpus", "ch10-corpus", heavy=True,
+                title="语料流水线", needs="mysql + 上游可用"),
+        JobSpec("ch10-dataset", "ch10-dataset", heavy=True,
+                title="划分与增强", needs="上游可用"),
+        JobSpec("ch10-train", "ch10-train", heavy=True,
+                title="全参微调", needs="ml 组已装"),
+        JobSpec("ch10-eval", "ch10-eval", title="测试集评测", needs="模型已训练"),
+        JobSpec("ch10-export", "ch10-export", title="导出 ONNX", needs="模型已训练"),
+        JobSpec("ch10-threshold-scan", "ch10-threshold-scan",
+                title="阈值扫描重演", needs="服务 :8110 在跑"),
+        JobSpec("classifier-up", "classifier-up", title="拉起分类器", needs="ONNX 已导出"),
+        JobSpec("classifier-down", "classifier-down", title="停掉分类器"),
+        JobSpec("classify-pool", "classify-pool", title="旁路批量归类",
+                needs="服务 :8110 在跑"),
+        JobSpec("classify-pool-force", "classify-pool", title="强跑归类(不足一批)",
+                needs="服务 :8110 在跑", args=("FORCE=1",)),
     ]
 }
 
@@ -103,7 +124,7 @@ def start(name: str) -> dict:
             kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
         else:
             kwargs["start_new_session"] = True
-        proc = subprocess.Popen(["make", spec.target], **kwargs)
+        proc = subprocess.Popen(["make", spec.target, *spec.args], **kwargs)
         _procs[name] = proc
         _handles[name] = handle
         return status(name)
