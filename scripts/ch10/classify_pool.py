@@ -12,9 +12,9 @@ from datetime import datetime
 
 import httpx
 
+from app.core.classifier import CLASSIFIER_URL
 from app.db import repository
 
-SERVICE = "http://127.0.0.1:8110"
 REPORTS = pathlib.Path("data/ch10/reports")
 
 
@@ -37,7 +37,7 @@ async def main(min_batch: int, force: bool) -> None:
         _write_run("below_batch", len(rows), 0, {})
         return
     async with httpx.AsyncClient(timeout=300) as client:
-        r = await client.post(f"{SERVICE}/classify",
+        r = await client.post(f"{CLASSIFIER_URL}/classify",
                               json={"texts": [x["text"] for x in rows]})
         r.raise_for_status()
         results = r.json()["results"]

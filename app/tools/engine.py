@@ -111,42 +111,39 @@ async def execute_tool_call(
     args = dict(tool_call.get("args") or {})
     model_args = dict(args)          # 审计只记模型实际发来的参数,不含系统注入字段
     started = time.monotonic()
+    spec = specs.get(name)
 
-    def _run(ok: bool, content: str, status: str, retry_count: int = 0) -> ToolRun:
-        return ToolRun(
+    async def _finish(content: str, status: str, *, ok: bool,
+                      summary: str | None = None, error: str | None = None,
+                      retry_count: int = 0) -> ToolRun:
+        """收尾只此一处:组 ToolRun、写审计(审计失败不反拦)、返回。"""
+        run = ToolRun(
             tool_call_id=tc_id, name=name, ok=ok, status=status,
             retry_count=retry_count,
             duration_ms=int((time.monotonic() - started) * 1000),
             tool_message=ToolMessage(
                 content=content, tool_call_id=tc_id, name=name or "unknown",
                 status="success" if ok else "error"))
+        await _audit(conversation_id, tc_id, name or "unknown", spec, model_args, summary,
+                     status, error, retry_count, run.duration_ms)
+        return run
 
-    spec = specs.get(name)
     # ① 查工具
     if spec is None:
-        run = _run(False, f"工具执行失败:未知工具 {name}", "失败")
-        await _audit(conversation_id, tc_id, name or "unknown", None, model_args, None,
-                     "失败", f"未知工具 {name}", 0, run.duration_ms)
-        return run
+        return await _finish(f"工具执行失败:未知工具 {name}", "失败",
+                             ok=False, error=f"未知工具 {name}")
 
     # ② JSON Schema 校验:拦下不抛异常,错误说明回灌模型(让它追问用户或重组调用)
     verr = validate_args(spec, args)
     if verr is not None:
-        run = _run(
-            False,
+        return await _finish(
             f"参数校验未通过:{verr}。请修正参数重新调用;缺少的信息请先向用户追问,不要编造。",
-            "校验拦下")
-        await _audit(conversation_id, tc_id, name, spec, model_args, None,
-                     "校验拦下", verr, 0, run.duration_ms)
-        return run
+            "校验拦下", ok=False, error=verr)
 
     # ③ 权限门:写操作必须带确认令牌(interrupt 确认后由 agent_tools 传入),模型绕不过
     if spec.permission == "write" and not confirmed:
         note = deny_note or "该写操作需要用户确认,未确认前拒绝执行。请勿再次发起,除非用户明确要求。"
-        run = _run(False, f"建工单未执行:{note}", "权限拒绝")
-        await _audit(conversation_id, tc_id, name, spec, model_args, None,
-                     "权限拒绝", note, 0, run.duration_ms)
-        return run
+        return await _finish(f"建工单未执行:{note}", "权限拒绝", ok=False, error=note)
 
     # ④ 执行:超时 + 暂时性故障重试(写操作/retryable=False 恒不重试)
     if spec.inject_conversation:
@@ -161,10 +158,8 @@ async def execute_tool_call(
             if isinstance(result, dict) and "_snapshot" in result:
                 LAST_TOOL_SNAPSHOT.set(result.pop("_snapshot") or [])
             content = _format_content(spec, result)
-            run = _run(True, content, "成功", attempt)
-            await _audit(conversation_id, tc_id, name, spec, model_args, _summarize(content),
-                         "成功", None, attempt, run.duration_ms)
-            return run
+            return await _finish(content, "成功", ok=True,
+                                 summary=_summarize(content), retry_count=attempt)
         except _TRANSIENT as e:
             if attempt < retries:
                 attempt += 1
@@ -175,20 +170,13 @@ async def execute_tool_call(
             is_timeout = isinstance(e, (asyncio.TimeoutError, TimeoutError))
             status = "超时" if is_timeout else "失败"
             # ⑤ 分诊:真故障如实回灌,不装没事
-            run = _run(
-                False,
+            return await _finish(
                 f"工具暂时不可用:{'执行超时' if is_timeout else type(e).__name__},"
                 "请稍后再试或如实告知用户。",
-                status, attempt)
-            await _audit(conversation_id, tc_id, name, spec, model_args, None, status,
-                         type(e).__name__, attempt, run.duration_ms)
-            return run
+                status, ok=False, error=type(e).__name__, retry_count=attempt)
         except Exception as e:  # noqa: BLE001 业务/未知异常:不重试,如实回灌
             logger.exception("工具执行失败 name=%s", name)
-            run = _run(
-                False,
+            return await _finish(
                 f"工具暂时不可用:{type(e).__name__}。请如实告知用户,不要编造结果。",
-                "失败", attempt)
-            await _audit(conversation_id, tc_id, name, spec, model_args, None, "失败",
-                         f"{type(e).__name__}: {e}"[:500], attempt, run.duration_ms)
-            return run
+                "失败", ok=False, error=f"{type(e).__name__}: {e}"[:500],
+                retry_count=attempt)

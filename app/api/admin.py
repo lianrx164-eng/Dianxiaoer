@@ -116,6 +116,55 @@ async def _observability_card() -> dict:
     })
 
 
+async def _review_card() -> dict:
+    try:
+        rows = await repository.list_review_queue(None)
+    except Exception:
+        return _card("review", "飞轮待审", "/review", "读数失败", "MySQL 读不到", {})
+    counts = {"待审": 0, "通过": 0, "驳回": 0}
+    for row in rows:
+        counts[row.review_status] = counts.get(row.review_status, 0) + 1
+    if not rows:
+        status, conclusion = "没数据", "还没有低置信度问题落池"
+    elif counts["待审"]:
+        status, conclusion = "要干活", f"{counts['待审']} 条待审,审完进知识库"
+    else:
+        status, conclusion = "正常", "待审已清零"
+    return _card("review", "飞轮待审", "/review", status, conclusion, counts)
+
+
+async def _topics_card() -> dict:
+    try:
+        dist = await repository.topic_distribution(samples_per_class=0)
+    except Exception:
+        return _card("topics", "主题分布", "/topics", "读数失败", "MySQL 读不到", {})
+    if not dist["total"]:
+        status, conclusion = "没数据", "池里还没有已归类的问题"
+    else:
+        top = max(dist["classes"], key=lambda c: c["count"])
+        status = "正常"
+        conclusion = (f"已归类 {dist['total']} 条,最多是「{top['label']}」{top['count']} 条")
+    return _card("topics", "主题分布", "/topics", status, conclusion,
+                 {"total": dist["total"], "latest": dist["latest"]})
+
+
+async def _acceptance_card() -> dict:
+    from app.api import acceptance
+    try:
+        ctx = await acceptance._load_ctx()
+        gates = acceptance._gates(ctx)
+    except Exception:
+        return _card("acceptance", "分类器验收", "/acceptance", "读数失败",
+                     "产物判定出错", {})
+    passed = sum(1 for g in gates if g["status"] == "pass")
+    online = bool(ctx["service"]["ok"])
+    return _card("acceptance", "分类器验收", "/acceptance",
+                 "正常" if passed == len(gates) else "要干活",
+                 f"{passed}/{len(gates)} 闸通过,分类器{'在线' if online else '未起'}",
+                 {"passed": passed, "total": len(gates), "online": online,
+                  "classified": ctx["classified"]})
+
+
 @router.get("/api/admin/overview")
 async def overview() -> dict:
     return {"cards": [
@@ -125,4 +174,7 @@ async def overview() -> dict:
         await _jobs_card(),
         await _observability_card(),
         await _rageval_card(),
+        await _review_card(),
+        await _topics_card(),
+        await _acceptance_card(),
     ]}

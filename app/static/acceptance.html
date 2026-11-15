@@ -17,6 +17,8 @@
   .gate-card .foot { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
     font-size: 12px; margin-top: 4px; }
   .gate-card a { color: #b45309; }
+  .controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+    margin: 10px 0 14px; font-size: 12.5px; }
 </style>
 </head>
 <body class="admin-page">
@@ -26,6 +28,7 @@
   <p class="admin-sub">九项实证各一张闸门卡;每张卡带重跑按钮,跑完自动刷新。</p>
 
   <div class="stats" id="stats"></div>
+  <div class="controls" id="controls"></div>
   <div class="grid" id="gates"><p class="muted">加载中…</p></div>
 </main>
 <script>
@@ -69,6 +72,14 @@ async function load() {
   });
 }
 
+function renderControls() {
+  const ctl = document.getElementById('controls');
+  ctl.appendChild(AC.el('span', { class: 'muted', text: '分类器服务' }));
+  ctl.appendChild(AC.jobBox('classifier-up', { label: '起分类器', onDone: load }));
+  ctl.appendChild(AC.jobBox('classifier-down', { label: '停分类器', onDone: load }));
+}
+
+renderControls();
 load();
 </script>
 </body>

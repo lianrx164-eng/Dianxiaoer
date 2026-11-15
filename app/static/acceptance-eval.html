@@ -20,6 +20,8 @@
   .score .track { height: 12px; background: #f2e7d2; border: 1px solid #d8c9ae; position: relative; }
   .score .track i { display: block; height: 100%; background: #c9a36a; }
   .score .track i.hit { background: #b45309; }
+  .score .track b.tline { position: absolute; top: -2px; bottom: -2px; width: 2px;
+    background: #1c1c1c; }
 </style>
 </head>
 <body class="admin-page">
@@ -68,11 +70,15 @@ AC.subnav('eval');
 
 function pct(x) { return x === null || x === undefined ? '—' : (x * 100).toFixed(1) + '%'; }
 
+let thresholdInUse = null;   // 分数条的阈值竖线;由 load() 从产品里读
+
 async function load() {
   let d;
   try { d = await AC.getJSON('/api/acceptance/eval'); }
   catch (e) { document.getElementById('classRows').innerHTML =
     '<tr><td colspan="7" class="muted">读取失败:' + e.message + '</td></tr>'; return; }
+
+  thresholdInUse = d.threshold_in_use == null ? null : Number(d.threshold_in_use);
 
   const stats = document.getElementById('stats');
   stats.innerHTML = '';
@@ -161,17 +167,25 @@ document.getElementById('tryBtn').addEventListener('click', async () => {
       { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ texts: [text] }) });
     const res = d.results[0];
-    const threshold = res.scores ? null : null;
     state.textContent = '命中:' + res.labels.join('、');
     Object.entries(res.scores).sort((a, b) => b[1] - a[1]).forEach(([k, v]) => {
       const hit = res.labels.includes(k);
       out.appendChild(AC.el('div', { class: 'score' }, [
         AC.el('div', { class: 'blabel', text: k }),
         AC.el('div', { class: 'track' }, [
-          AC.el('i', { class: hit ? 'hit' : '', style: 'width:' + Math.round(v * 100) + '%' })]),
+          AC.el('i', { class: hit ? 'hit' : '', style: 'width:' + Math.round(v * 100) + '%' }),
+          thresholdInUse === null ? '' :
+            AC.el('b', { class: 'tline', style: 'left:' + (thresholdInUse * 100) + '%' })]),
         AC.el('div', { class: 'bval', text: v.toFixed(3) }),
       ]));
     });
+    const [topLabel, topScore] = Object.entries(res.scores)
+      .sort((a, b) => b[1] - a[1])[0];
+    if (thresholdInUse !== null && topScore < thresholdInUse) {
+      out.appendChild(AC.el('div', { class: 'muted', style: 'margin-top:8px;font-size:12px',
+        text: '17 类都没过线(阈值 ' + thresholdInUse + '),按兜底取了最高分类「'
+              + topLabel + '」' }));
+    }
   } catch (e) {
     state.textContent = e.message;
   }

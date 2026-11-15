@@ -13,7 +13,7 @@ from transformers import (AutoModelForSequenceClassification, AutoTokenizer,
                           default_data_collator)
 
 from app.core.taxonomy import ID2LABEL, LABEL2ID, NUM_CLASSES
-from scripts.ch10.inference_lib import apply_threshold
+from scripts.ch10.inference_lib import apply_threshold, sigmoid
 
 BASE = "hfl/chinese-roberta-wwm-ext"
 DATA = pathlib.Path("data/ch10/dataset")
@@ -41,7 +41,7 @@ def encode(samples: list[dict], tokenizer) -> list[dict]:
 
 def compute_metrics(eval_pred):
     logits, labels = eval_pred
-    preds = (1 / (1 + np.exp(-logits)) >= 0.5).astype(int)
+    preds = (sigmoid(logits) >= 0.5).astype(int)
     return {"micro_f1": f1_score(labels, preds, average="micro", zero_division=0),
             "macro_f1": f1_score(labels, preds, average="macro", zero_division=0)}
 
@@ -80,7 +80,7 @@ def main() -> None:
     trainer.train()
     # 验证集上扫全局最优阈值(0.30~0.70 步进 0.05)
     logits = trainer.predict(val_ds).predictions
-    probs = 1 / (1 + np.exp(-logits))
+    probs = sigmoid(logits)
     gold = np.array([d["labels"] for d in val_ds])
     best_t, best_f1 = 0.5, -1.0
     for t in np.arange(0.30, 0.71, 0.05):

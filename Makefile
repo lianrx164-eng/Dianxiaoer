@@ -172,11 +172,13 @@ ch10-export:  ## 导出 ONNX 并校验与 torch 预测完全一致
 
 classifier-up:  ## ch10 推理服务 :8110(ONNX 轻运行时)
 	@mkdir -p log data
-	@PYTHONPATH=. nohup uv run --group ml python scripts/ch10/serve.py > log/classifier.log 2>&1 & echo $$! > data/classifier.pid
+	@PYTHONPATH=. nohup uv run --group serve python scripts/ch10/serve.py > log/classifier.log 2>&1 &
 	@sleep 4 && curl -sf http://127.0.0.1:8110/healthz >/dev/null && echo "分类器服务已拉起: :8110(pid 见 data/classifier.pid)" || echo "启动失败,看 log/classifier.log"
 
 classifier-down:
-	-@kill `cat data/classifier.pid 2>/dev/null` 2>/dev/null; rm -f data/classifier.pid
+	-@PID=`cat data/classifier.pid 2>/dev/null`; [ -n "$$PID" ] && kill $$PID 2>/dev/null
+	-@PID=`cat data/classifier.pid 2>/dev/null`; [ -n "$$PID" ] && taskkill //PID $$PID //T //F >/dev/null 2>&1
+	@rm -f data/classifier.pid
 	@echo "分类器服务已停"
 
 classify-pool:  ## ch10 旁路批量归类:攒够一批归一次,写 topic_classifications(需 :8110)

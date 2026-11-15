@@ -29,9 +29,9 @@
         <table class="tbl" id="tbl">
           <thead><tr>
             <th>问题</th><th>命中类目</th><th>来源</th>
-            <th>同义合并</th><th>审核</th><th>归类时间</th>
+            <th>同义合并</th><th>审核</th><th>落池时间</th><th>归类时间</th>
           </tr></thead>
-          <tbody id="rows"><tr><td colspan="6" class="muted">加载中…</td></tr></tbody>
+          <tbody id="rows"><tr><td colspan="7" class="muted">加载中…</td></tr></tbody>
         </table>
       </div>
       <div class="pager" id="pager"></div>
@@ -81,7 +81,7 @@ function fmtTime(ts) { return ts ? ts.replace('T', ' ').slice(0, 16) : '—'; }
   const rows = document.getElementById('rows');
   rows.innerHTML = '';
   if (!body.items.length) {
-    rows.innerHTML = '<tr><td colspan="6" class="muted">这一类下还没有问题。</td></tr>';
+    rows.innerHTML = '<tr><td colspan="7" class="muted">这一类下还没有问题。</td></tr>';
   }
   body.items.forEach(it => {
     const q = AC.el('td', {}, [
@@ -96,6 +96,7 @@ function fmtTime(ts) { return ts ? ts.replace('T', ' ').slice(0, 16) : '—'; }
       AC.el('td', { class: 'mono', text: it.source || '—' }),
       AC.el('td', { class: 'mono', text: it.occurrence_count ? '×' + it.occurrence_count : '—' }),
       AC.el('td', { text: it.review_status || '—' }),
+      AC.el('td', { class: 'mono', text: fmtTime(it.pooled_at) }),
       AC.el('td', { class: 'mono', text: fmtTime(it.classified_at) }),
     ]));
   });

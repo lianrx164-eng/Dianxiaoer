@@ -13,6 +13,8 @@ import onnxruntime as ort
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
+from scripts.ch10.inference_lib import sigmoid
+
 MODEL_DIR = pathlib.Path("data/ch10/model")
 OUT = pathlib.Path("data/ch10/onnx")
 TEST = pathlib.Path("data/ch10/dataset/test.jsonl")
@@ -86,8 +88,8 @@ def main() -> None:
             t_logits = wrapper(**enc).numpy()
             (o_logits,) = sess.run(["logits"], {k: v.numpy() for k, v in enc.items()})
             assert np.allclose(t_logits, o_logits, atol=1e-3), "logits 超容差"
-            t_pred = (1 / (1 + np.exp(-t_logits)) >= threshold)
-            o_pred = (1 / (1 + np.exp(-o_logits)) >= threshold)
+            t_pred = (sigmoid(t_logits) >= threshold)
+            o_pred = (sigmoid(o_logits) >= threshold)
             mismatch += int((t_pred != o_pred).any(axis=1).sum())
     if mismatch:
         _write_report(len(texts), mismatch, route, OUT / "model.onnx")

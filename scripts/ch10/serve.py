@@ -3,7 +3,9 @@
 起停:make classifier-up / classifier-down(仓库惯例 nohup + pid 文件)。
 """
 import json
+import os
 import pathlib
+from urllib.parse import urlparse
 
 import numpy as np
 import onnxruntime as ort
@@ -12,8 +14,9 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from tokenizers import Tokenizer
 
+from app.core.classifier import CLASSIFIER_URL
 from app.core.taxonomy import TOPIC_NAMES
-from scripts.ch10.inference_lib import apply_threshold
+from scripts.ch10.inference_lib import apply_threshold, sigmoid
 
 DIR = pathlib.Path("data/ch10/onnx")
 
@@ -45,7 +48,7 @@ def classify(body: ClassifyIn):
         "token_type_ids": np.array([e.type_ids for e in encs], dtype=np.int64),
     }
     (logits,) = _sess.run(["logits"], feed)
-    probs = 1 / (1 + np.exp(-logits))
+    probs = sigmoid(logits)
     preds = apply_threshold(probs, _threshold)
     results = []
     for row, hit in zip(probs, preds):
@@ -57,4 +60,9 @@ def classify(body: ClassifyIn):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=8110)
+    # 自报 PID:make 里 `$!` 记的是 uv 包装进程,杀它杀不到 python 子进程
+    pid_file = pathlib.Path("data/classifier.pid")
+    pid_file.parent.mkdir(parents=True, exist_ok=True)
+    pid_file.write_text(str(os.getpid()))
+    url = urlparse(CLASSIFIER_URL)
+    uvicorn.run(app, host=url.hostname, port=url.port)

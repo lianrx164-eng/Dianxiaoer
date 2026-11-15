@@ -13,13 +13,13 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from app.core.classifier import CLASSIFIER_URL
 from app.core.taxonomy import SEVERITY, TOPIC_NAMES
 from app.db import repository
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 DATA = REPO / "data" / "ch10"
 REPORTS = DATA / "reports"
-SERVICE = "http://127.0.0.1:8110"
 
 MIN_MICRO_F1 = 0.8         # 测试集总闸
 MIN_VAL_F1 = 0.8           # 训练产物闸
@@ -63,10 +63,10 @@ def _load(name: str, make: str) -> dict:
 async def _probe() -> dict:
     try:
         async with httpx.AsyncClient(timeout=1.5) as client:
-            r = await client.get(f"{SERVICE}/healthz")
-        return {"ok": r.status_code == 200, "url": SERVICE}
+            r = await client.get(f"{CLASSIFIER_URL}/healthz")
+        return {"ok": r.status_code == 200, "url": CLASSIFIER_URL}
     except Exception:                                  # noqa: BLE001 - 探活失败即不在线
-        return {"ok": False, "url": SERVICE}
+        return {"ok": False, "url": CLASSIFIER_URL}
 
 
 async def _classified_total() -> int | None:
@@ -84,6 +84,23 @@ def _line_count(path: pathlib.Path) -> int | None:
     return sum(1 for l in path.read_text(encoding="utf-8").splitlines() if l.strip())
 
 
+def _read_jsonl(path: pathlib.Path) -> list[dict] | None:
+    """逐行解析;出现坏行(作业写到一半被杀)就整份作废,不拿半份数据装完整。"""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    rows = []
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            return None
+    return rows
+
+
 def _split_stats() -> dict:
     splits: dict[str, dict] = {}
     texts: dict[str, set[str]] = {}
@@ -92,8 +109,9 @@ def _split_stats() -> dict:
         path = DATA / "dataset" / f"{name}.jsonl"
         if not path.exists():
             continue
-        rows = [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines()
-                if l.strip()]
+        rows = _read_jsonl(path)
+        if rows is None:
+            continue
         counts = {n: 0 for n in TOPIC_NAMES}
         for s in rows:
             for lb in s.get("labels", []):
@@ -348,7 +366,7 @@ class ClassifyIn(BaseModel):
 async def classify(body: ClassifyIn):
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.post(f"{SERVICE}/classify", json={"texts": body.texts})
+            r = await client.post(f"{CLASSIFIER_URL}/classify", json={"texts": body.texts})
             r.raise_for_status()
             return r.json()
     except Exception as exc:                            # noqa: BLE001 - 服务不可达要说清楚

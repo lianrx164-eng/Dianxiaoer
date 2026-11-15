@@ -10,10 +10,10 @@ import httpx
 import numpy as np
 from sklearn.metrics import f1_score
 
+from app.core.classifier import CLASSIFIER_URL
 from app.core.taxonomy import LABEL2ID, NUM_CLASSES, TOPIC_NAMES
 from scripts.ch10.inference_lib import apply_threshold
 
-SERVICE = "http://127.0.0.1:8110"
 VAL = pathlib.Path("data/ch10/dataset/val.jsonl")
 MODEL = pathlib.Path("data/ch10/model/threshold.json")
 REPORTS = pathlib.Path("data/ch10/reports")
@@ -25,7 +25,7 @@ def main() -> None:
                if l.strip()]
     texts = [s["text"] for s in samples]
     with httpx.Client(timeout=300) as c:
-        r = c.post(f"{SERVICE}/classify", json={"texts": texts})
+        r = c.post(f"{CLASSIFIER_URL}/classify", json={"texts": texts})
         r.raise_for_status()
         results = r.json()["results"]
     probs = np.array([[res["scores"][n] for n in TOPIC_NAMES] for res in results])

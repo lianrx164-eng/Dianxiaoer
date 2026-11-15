@@ -2,8 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.config import settings
-from app.core.llm import get_chat_model
+from app.core.llm import get_chat_model, thinking_body
 from app.core.prompts import MINING_PROMPT
 from app.db import repository
 from app.kb import dedup, dualwrite
@@ -22,11 +21,7 @@ class QaExtraction(BaseModel):
 
 def _mining_model():
     # 与 ch01 提取任务同款:DeepSeek 思考模式不支持强制 tool_choice,需显式关闭
-    extra_body = (
-        {"thinking": {"type": settings.extract_thinking}}
-        if settings.extract_thinking else None
-    )
-    return get_chat_model(extra_body=extra_body)
+    return get_chat_model(extra_body=thinking_body())
 
 
 async def extract_qa_with_sources(

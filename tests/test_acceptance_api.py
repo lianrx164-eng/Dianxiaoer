@@ -77,7 +77,7 @@ async def test_errors_missing_returns_empty(client, reports, service_down):
 
 
 async def test_service_probe_failure(client, reports, monkeypatch):
-    monkeypatch.setattr(acc, "SERVICE", "http://127.0.0.1:9")   # 关闭的端口
+    monkeypatch.setattr(acc, "CLASSIFIER_URL", "http://127.0.0.1:9")   # 关闭的端口
     d = (await client.get("/api/acceptance/service")).json()
     assert d["ok"] is False
 
@@ -87,3 +87,19 @@ async def test_data_missing_dataset(client, reports, service_down):
     assert d["dataset"]["present"] is False
     assert d["lineage"]["raw"] is None
     assert d["sample_review"] is False
+
+
+async def test_half_written_dataset_is_missing(client, reports, service_down):
+    ds = reports / "dataset"
+    ds.mkdir()
+    for name in ("val", "test"):
+        (ds / f"{name}.jsonl").write_text('{"text": "a", "labels": ["尺码"]}\n',
+                                          encoding="utf-8")
+    # 作业写到一半被杀:最后一行没有换行也没有闭合括号
+    (ds / "train.jsonl").write_text('{"text": "a", "labels": ["尺码"]}\n{"text": "半',
+                                    encoding="utf-8")
+    r = await client.get("/api/acceptance/data")
+    assert r.status_code == 200
+    assert r.json()["dataset"]["present"] is False
+    overview = (await client.get("/api/acceptance/overview")).json()
+    assert next(b for b in overview["blocks"] if b["key"] == "data")["status"] == "missing"

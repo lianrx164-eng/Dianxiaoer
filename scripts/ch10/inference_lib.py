@@ -6,6 +6,11 @@
 import numpy as np
 
 
+def sigmoid(logits: np.ndarray) -> np.ndarray:
+    """logits → 0..1 概率;多标签 BCE,各维独立。"""
+    return 1 / (1 + np.exp(-np.asarray(logits)))
+
+
 def apply_threshold(probs: np.ndarray, threshold: float) -> np.ndarray:
     """probs: (n, num_classes);返回同形状 0/1 矩阵。"""
     preds = (np.asarray(probs) >= threshold).astype(int)

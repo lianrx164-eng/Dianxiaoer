@@ -3,8 +3,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 from langchain_core.runnables import Runnable
 
-from app.config import settings
-from app.core.llm import get_chat_model
+from app.core.llm import get_chat_model, thinking_body
 from app.core.prompts import EXTRACT_PROMPT
 from app.schemas.extract import AfterSalesTicket, ExtractRequest
 
@@ -14,12 +13,7 @@ router = APIRouter()
 
 def get_extractor() -> Runnable:
     # 思考开关走配置:换上游只改 .env,不动代码
-    extra_body = (
-        {"thinking": {"type": settings.extract_thinking}}
-        if settings.extract_thinking
-        else None
-    )
-    model = get_chat_model(extra_body=extra_body)
+    model = get_chat_model(extra_body=thinking_body())
     return EXTRACT_PROMPT | model.with_structured_output(
         AfterSalesTicket, method="function_calling"
     )
