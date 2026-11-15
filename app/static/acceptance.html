@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>分类器验收总览 | 喵喵优选</title>
+<link rel="stylesheet" href="/static/acceptance.css">
+<script src="/static/admin.js"></script>
+<script src="/static/acceptance.js"></script>
+<style>
+  .gate-card { border: 2px solid #1c1c1c; background: #fffdf7; padding: 12px 14px;
+    box-shadow: 4px 4px 0 rgba(28,28,28,.12); display: flex; flex-direction: column; gap: 6px; }
+  .gate-card h3 { margin: 0; font-size: 14px; }
+  .gate-card .no { color: #b45309; font-weight: 700; margin-right: 6px; }
+  .gate-card .head { font-size: 13px; }
+  .gate-card .note { font-size: 11.5px; color: #6b5b45; }
+  .gate-card .foot { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    font-size: 12px; margin-top: 4px; }
+  .gate-card a { color: #b45309; }
+</style>
+</head>
+<body class="admin-page">
+<div id="admin-nav"></div>
+<main class="admin-shell">
+  <h1 class="admin-title">分类器验收总览</h1>
+  <p class="admin-sub">九项实证各一张闸门卡;每张卡带重跑按钮,跑完自动刷新。</p>
+
+  <div class="stats" id="stats"></div>
+  <div class="grid" id="gates"><p class="muted">加载中…</p></div>
+</main>
+<script>
+mountAdminNav('acceptance');
+AC.subnav('acceptance');
+
+async function load() {
+  let d;
+  try { d = await AC.getJSON('/api/acceptance/overview'); }
+  catch (e) {
+    document.getElementById('gates').innerHTML = '<p class="muted">读取失败:' + e.message + '</p>';
+    return;
+  }
+  const stats = document.getElementById('stats');
+  stats.innerHTML = '';
+  const tile = (k, v, cls) => stats.appendChild(AC.el('div', { class: 'tile' }, [
+    AC.el('div', { class: 'muted', text: k }),
+    AC.el('div', { class: 'mono ' + (cls || ''), text: v }),
+  ]));
+  tile('总闸', d.passed + ' / ' + d.total);
+  tile('分类器服务', d.classifier.ok ? '在线 :8110' : '未起', d.classifier.ok ? '' : '');
+  tile('结论', d.all_pass ? '九项全过' : '还有未过项');
+
+  const host = document.getElementById('gates');
+  host.innerHTML = '';
+  d.blocks.forEach(b => {
+    const card = AC.el('div', { class: 'gate-card' }, [
+      AC.el('h3', {}, [
+        AC.el('span', { class: 'no', text: '#' + b.no }),
+        AC.el('span', { text: b.title }),
+      ]),
+      AC.el('div', {}, [AC.statusPill(b.status)]),
+      AC.el('div', { class: 'head', text: b.headline || '' }),
+      b.note ? AC.el('div', { class: 'note', text: b.note }) : '',
+      AC.el('div', { class: 'foot' }, [
+        AC.el('a', { href: b.page, text: '看细节 →' }),
+        AC.jobBox(b.job, { onDone: load }),
+      ]),
+    ]);
+    host.appendChild(card);
+  });
+}
+
+load();
+</script>
+</body>
+</html>

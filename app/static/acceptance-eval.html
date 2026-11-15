@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>分类器评测详情 | 喵喵优选</title>
+<link rel="stylesheet" href="/static/acceptance.css">
+<script src="/static/admin.js"></script>
+<script src="/static/acceptance.js"></script>
+<style>
+  .cm { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; }
+  .cm .cell { border: 2px solid #1c1c1c; background: #fffdf7; padding: 8px 10px; font-size: 12px; }
+  .cm .cell b { display: block; font-size: 12.5px; margin-bottom: 4px; }
+  .cm .q { font-family: ui-monospace, monospace; }
+  .bad-row td { background: #fbeceb; }
+  .trybox textarea { width: 100%; min-height: 70px; padding: 8px; font: inherit;
+    border: 2px solid #1c1c1c; background: #fff8ec; }
+  .score { display: grid; grid-template-columns: 96px 1fr 56px; gap: 8px; align-items: center;
+    font-size: 12px; margin: 3px 0; }
+  .score .track { height: 12px; background: #f2e7d2; border: 1px solid #d8c9ae; position: relative; }
+  .score .track i { display: block; height: 100%; background: #c9a36a; }
+  .score .track i.hit { background: #b45309; }
+</style>
+</head>
+<body class="admin-page">
+<div id="admin-nav"></div>
+<main class="admin-shell">
+  <h1 class="admin-title">分类器评测详情</h1>
+  <p class="admin-sub">测试集上的每类指标、阈值扫描、混淆矩阵与单句试分类。</p>
+
+  <div class="stats" id="stats"></div>
+
+  <section class="panel">
+    <div class="panel-head"><h2>每类指标</h2>
+      <span class="panel-note">红线按档位:严 0.9 / 中 0.8 / 宽不设线</span></div>
+    <div class="panel-body tablerow">
+      <table class="tbl"><thead><tr>
+        <th>类目</th><th>档位</th><th>P</th><th>R</th><th>F1</th><th>support</th><th>红线</th>
+      </tr></thead><tbody id="classRows"><tr><td colspan="7" class="muted">加载中…</td></tr></tbody></table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>阈值扫描(九条候选线)</h2></div>
+    <div class="panel-body" id="scan"><p class="muted">加载中…</p></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>17 类混淆矩阵</h2><span class="panel-note">TN / FP / FN / TP</span></div>
+    <div class="panel-body cm" id="cm"><p class="muted">加载中…</p></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>单句试分类</h2><span class="panel-note">17 类各自过线,过几个打几个</span></div>
+    <div class="panel-body trybox">
+      <textarea id="tryText">买大了想退</textarea>
+      <div class="btnrow" style="margin-top:8px">
+        <button id="tryBtn">分类</button>
+        <span class="muted" id="tryState"></span>
+      </div>
+      <div id="tryOut" style="margin-top:10px"></div>
+    </div>
+  </section>
+</main>
+<script>
+mountAdminNav('acceptance');
+AC.subnav('eval');
+
+function pct(x) { return x === null || x === undefined ? '—' : (x * 100).toFixed(1) + '%'; }
+
+async function load() {
+  let d;
+  try { d = await AC.getJSON('/api/acceptance/eval'); }
+  catch (e) { document.getElementById('classRows').innerHTML =
+    '<tr><td colspan="7" class="muted">读取失败:' + e.message + '</td></tr>'; return; }
+
+  const stats = document.getElementById('stats');
+  stats.innerHTML = '';
+  const ev = d.eval || {};
+  const tile = (k, v) => stats.appendChild(AC.el('div', { class: 'tile' }, [
+    AC.el('div', { class: 'muted', text: k }),
+    AC.el('div', { class: 'mono', text: v }),
+  ]));
+  if (ev.present) {
+    tile('micro F1', pct(ev.micro && ev.micro.f1));
+    tile('macro F1', pct(ev.macro && ev.macro.f1));
+    tile('测试集', ev.test_size + ' 条');
+    tile('在用阈值', String(d.threshold_in_use));
+  } else {
+    tile('测试集评测', '还没跑过');
+  }
+  tile('分类器服务', d.classifier.ok ? '在线' : '未起');
+
+  const body = document.getElementById('classRows');
+  body.innerHTML = '';
+  if (!ev.present) {
+    body.innerHTML = '<tr><td colspan="7" class="muted">还没有评测报告:先跑 make ch10-eval。</td></tr>';
+  } else {
+    ev.classes.forEach(c => {
+      const bad = c.passed === false;
+      body.appendChild(AC.el('tr', { class: bad ? 'bad-row' : '' }, [
+        AC.el('td', { text: c.name }),
+        AC.el('td', { text: c.severity }),
+        AC.el('td', { class: 'mono', text: pct(c.p) }),
+        AC.el('td', { class: 'mono', text: pct(c.r) }),
+        AC.el('td', { class: 'mono', text: pct(c.f1) }),
+        AC.el('td', { class: 'mono', text: String(c.support) }),
+        AC.el('td', { text: c.red_line === null || c.red_line === undefined
+          ? '—' : (c.passed ? '✅ ' : '🔴 ') + c.red_line }),
+      ]));
+    });
+  }
+
+  const scanHost = document.getElementById('scan');
+  scanHost.innerHTML = '';
+  const sc = d.scan || {};
+  if (!sc.present) {
+    scanHost.innerHTML = '<p class="muted">还没有扫描结果:先跑 make ch10-threshold-scan。</p>';
+  } else {
+    const f1s = sc.scan.map(s => s.micro_f1);
+    const lo = Math.min(...f1s), hi = Math.max(...f1s);
+    sc.scan.forEach(s => {
+      const w = hi === lo ? 100 : Math.round((s.micro_f1 - lo) / (hi - lo) * 90) + 10;
+      const hit = s.threshold === sc.in_use_threshold;
+      scanHost.appendChild(AC.el('div', { class: 'bar-row' }, [
+        AC.el('div', { class: 'blabel', text: s.threshold.toFixed(2) + (hit ? ' (在用)' : '') }),
+        AC.el('div', { class: 'bar-track' }, [
+          AC.el('i', { class: hit ? 'v4' : '', style: 'width:' + w + '%' })]),
+        AC.el('div', { class: 'bval', text: s.micro_f1.toFixed(4) }),
+      ]));
+    });
+    scanHost.appendChild(AC.el('p', { class: 'kpi-note',
+      text: '重演当选 ' + sc.best_threshold + ',在用 ' + sc.in_use_threshold
+        + ',一致=' + sc.consistent + '(' + sc.tolerance + ')' }));
+  }
+
+  const cm = document.getElementById('cm');
+  cm.innerHTML = '';
+  if (!ev.present) {
+    cm.innerHTML = '<p class="muted">还没有混淆矩阵。</p>';
+  } else {
+    ev.classes.forEach(c => {
+      cm.appendChild(AC.el('div', { class: 'cell' }, [
+        AC.el('b', { text: c.name }),
+        AC.el('div', { class: 'q', text: 'TN ' + c.tn + ' · FP ' + c.fp }),
+        AC.el('div', { class: 'q', text: 'FN ' + c.fn + ' · TP ' + c.tp }),
+      ]));
+    });
+  }
+}
+
+document.getElementById('tryBtn').addEventListener('click', async () => {
+  const text = document.getElementById('tryText').value.trim();
+  const out = document.getElementById('tryOut');
+  const state = document.getElementById('tryState');
+  if (!text) return;
+  state.textContent = '分类中…';
+  out.innerHTML = '';
+  try {
+    const d = await AC.getJSON('/api/acceptance/classify',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ texts: [text] }) });
+    const res = d.results[0];
+    const threshold = res.scores ? null : null;
+    state.textContent = '命中:' + res.labels.join('、');
+    Object.entries(res.scores).sort((a, b) => b[1] - a[1]).forEach(([k, v]) => {
+      const hit = res.labels.includes(k);
+      out.appendChild(AC.el('div', { class: 'score' }, [
+        AC.el('div', { class: 'blabel', text: k }),
+        AC.el('div', { class: 'track' }, [
+          AC.el('i', { class: hit ? 'hit' : '', style: 'width:' + Math.round(v * 100) + '%' })]),
+        AC.el('div', { class: 'bval', text: v.toFixed(3) }),
+      ]));
+    });
+  } catch (e) {
+    state.textContent = e.message;
+  }
+});
+
+load();
+</script>
+</body>
+</html>

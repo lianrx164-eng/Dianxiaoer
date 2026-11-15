@@ -106,3 +106,23 @@ def topics_page() -> FileResponse:
 @app.get("/topics/questions", include_in_schema=False)
 def topic_questions_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "topic-questions.html")
+
+
+@app.get("/acceptance", include_in_schema=False)
+def acceptance_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "acceptance.html")
+
+
+@app.get("/acceptance/eval", include_in_schema=False)
+def acceptance_eval_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "acceptance-eval.html")
+
+
+@app.get("/acceptance/data", include_in_schema=False)
+def acceptance_data_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "acceptance-data.html")
+
+
+@app.get("/acceptance/errors", include_in_schema=False)
+def acceptance_errors_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "acceptance-errors.html")

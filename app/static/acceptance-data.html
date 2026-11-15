@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>数据产物 | 喵喵优选</title>
+<link rel="stylesheet" href="/static/acceptance.css">
+<script src="/static/admin.js"></script>
+<script src="/static/acceptance.js"></script>
+<style>
+  .flow { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; }
+  .flow .step { border: 2px solid #1c1c1c; background: #fffdf7; padding: 8px 12px; }
+  .flow .arrow { color: #b45309; font-weight: 700; }
+  .zero { color: #9a3412; font-weight: 700; }
+</style>
+</head>
+<body class="admin-page">
+<div id="admin-nav"></div>
+<main class="admin-shell">
+  <h1 class="admin-title">数据产物</h1>
+  <p class="admin-sub">语料血缘、三份考卷的分布与泄漏自检、训练与 ONNX 产物。</p>
+
+  <section class="panel">
+    <div class="panel-head"><h2>语料血缘</h2></div>
+    <div class="panel-body"><div class="flow" id="lineage"><span class="muted">加载中…</span></div></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>三份考卷</h2>
+      <span class="panel-note" id="leakNote"></span></div>
+    <div class="panel-body tablerow">
+      <table class="tbl"><thead><tr>
+        <th>类目</th><th>训练</th><th>验证</th><th>测试</th>
+      </tr></thead><tbody id="splitRows"><tr><td colspan="4" class="muted">加载中…</td></tr></tbody></table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>训练与导出产物</h2></div>
+    <div class="panel-body tablerow">
+      <table class="tbl"><thead><tr><th>文件</th><th>存在</th><th>大小</th></tr></thead>
+        <tbody id="fileRows"><tr><td colspan="3" class="muted">加载中…</td></tr></tbody></table>
+    </div>
+  </section>
+</main>
+<script>
+mountAdminNav('acceptance');
+AC.subnav('data');
+
+(async () => {
+  let d;
+  try { d = await AC.getJSON('/api/acceptance/data'); }
+  catch (e) { document.getElementById('lineage').textContent = '读取失败:' + e.message; return; }
+
+  const lin = d.lineage || {};
+  const step = (name, n) => AC.el('div', { class: 'step' },
+    [AC.el('div', { class: 'muted', text: name }),
+     AC.el('div', { class: 'mono', text: n === null || n === undefined ? '缺失' : n + ' 条' })]);
+  const host = document.getElementById('lineage');
+  host.innerHTML = '';
+  host.appendChild(step('捞池 corpus_raw', lin.raw));
+  host.appendChild(AC.el('span', { class: 'arrow', text: '→' }));
+  host.appendChild(step('清洗 corpus_clean', lin.clean));
+  host.appendChild(AC.el('span', { class: 'arrow', text: '→' }));
+  host.appendChild(step('预标+补足 corpus_labeled', lin.labeled));
+  host.appendChild(AC.el('span', { class: 'arrow', text: '→' }));
+  host.appendChild(step('分层划分 dataset/', d.dataset.present ? '3 份' : '缺失'));
+
+  const note = document.getElementById('leakNote');
+  if (d.dataset.present) {
+    const l = d.leaks || {};
+    const total = (l.train_val || 0) + (l.train_test || 0) + (l.val_test || 0);
+    note.textContent = total === 0
+      ? '泄漏自检:三份两两重叠 0 条 ✅'
+      : '泄漏自检:重叠 ' + total + ' 条,考卷被污染 🔴';
+    note.className = total === 0 ? 'panel-note' : 'panel-note zero';
+  } else {
+    note.textContent = '三份考卷还没生成';
+  }
+
+  const rows = document.getElementById('splitRows');
+  rows.innerHTML = '';
+  if (!d.dataset.present) {
+    rows.innerHTML = '<tr><td colspan="4" class="muted">先跑 make ch10-dataset。</td></tr>';
+  } else {
+    (d.topic_names || []).forEach(name => {
+      const tr = AC.el('tr', {}, [AC.el('td', { text: name })]);
+      ['train', 'val', 'test'].forEach(s => {
+        const n = d.dataset.splits[s] ? d.dataset.splits[s].per_class[name] : null;
+        tr.appendChild(AC.el('td', { class: 'mono' + (n === 0 ? ' zero' : ''),
+                                     text: n === null ? '—' : String(n) }));
+      });
+      rows.appendChild(tr);
+    });
+  }
+
+  const files = document.getElementById('fileRows');
+  files.innerHTML = '';
+  const addGroup = (title, group) => {
+    Object.entries(group || {}).forEach(([name, st]) => {
+      files.appendChild(AC.el('tr', {}, [
+        AC.el('td', { class: 'mono', text: title + '/' + name }),
+        AC.el('td', { text: st.exists ? '✅' : '—' }),
+        AC.el('td', { class: 'mono', text: AC.fmtBytes(st.bytes) }),
+      ]));
+    });
+  };
+  addGroup('model', d.model);
+  addGroup('onnx', d.onnx);
+})();
+</script>
+</body>
+</html>

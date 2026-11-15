@@ -28,6 +28,7 @@
       ['review', '飞轮待审', '/review'],
       ['observability', '观测与成本', '/observability'],
       ['topics', '主题分布', '/topics'],
+      ['acceptance', '分类器验收', '/acceptance'],
       ['chat', '聊天页', '/'],
     ];
     const nav = document.createElement('nav');

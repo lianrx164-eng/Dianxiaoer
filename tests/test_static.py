@@ -6,7 +6,8 @@ from app.main import app
 async def test_admin_pages_and_shared_nav():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         for path in ("/kb", "/admin", "/rag-eval", "/review", "/observability",
-                     "/topics", "/topics/questions"):
+                     "/topics", "/topics/questions", "/acceptance",
+                     "/acceptance/eval", "/acceptance/data", "/acceptance/errors"):
             r = await c.get(path)
             assert r.status_code == 200
             assert "/static/admin.js" in r.text

@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>错例复核 | 喵喵优选</title>
+<link rel="stylesheet" href="/static/acceptance.css">
+<script src="/static/admin.js"></script>
+<script src="/static/acceptance.js"></script>
+<style>
+  .err { border-left: 4px solid #c9a36a; background: #faf3e6; padding: 8px 12px; margin: 0 0 8px; }
+  .err .meta { font-size: 12px; color: #6b5b45; margin-top: 4px; }
+  .missed { color: #9a3412; font-weight: 700; }
+  .extra { color: #b45309; font-weight: 700; }
+  .hit2 { color: #166534; }
+  .pair { font-family: ui-monospace, monospace; }
+</style>
+</head>
+<body class="admin-page">
+<div id="admin-nav"></div>
+<main class="admin-shell">
+  <h1 class="admin-title">错例复核</h1>
+  <p class="admin-sub">自动指标之外的第二只眼睛:错在哪一类?是不是标注本身有毛病?</p>
+
+  <div class="stats" id="stats"></div>
+
+  <section class="panel">
+    <div class="panel-head"><h2>记账口径</h2></div>
+    <div class="panel-body">
+      <p class="muted">漏打 = 该打的没打(1 笔);多打 = 不该打的多打(1 笔);
+        错位 = 该打的没打、还打了别的类(2 笔:被抢的类 +1、抢标签的类 +1)。
+        所以错例条数 ≤ 矩阵笔数,差额全在错位上。</p>
+      <div id="kinds" class="stats"></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>边界摩擦配对</h2>
+      <span class="panel-note">同一对出现 ≥2 次的,多半是边界说明没划开</span></div>
+    <div class="panel-body tablerow">
+      <table class="tbl"><thead><tr><th>被抢 → 抢走</th><th>次数</th></tr></thead>
+        <tbody id="pairs"><tr><td colspan="2" class="muted">加载中…</td></tr></tbody></table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>逐条错例</h2></div>
+    <div class="panel-body" id="errs"><p class="muted">加载中…</p></div>
+  </section>
+</main>
+<script>
+mountAdminNav('acceptance');
+AC.subnav('errors');
+
+(async () => {
+  let d;
+  try { d = await AC.getJSON('/api/acceptance/errors'); }
+  catch (e) { document.getElementById('errs').textContent = '读取失败:' + e.message; return; }
+
+  const stats = document.getElementById('stats');
+  stats.innerHTML = '';
+  const tile = (k, v) => stats.appendChild(AC.el('div', { class: 'tile' }, [
+    AC.el('div', { class: 'muted', text: k }),
+    AC.el('div', { class: 'mono', text: String(v) }),
+  ]));
+  tile('错例条数', d.errors.length);
+  tile('矩阵笔数', d.matrix_entries);
+  tile('FP 合计', d.total_fp === null || d.total_fp === undefined ? '—' : d.total_fp);
+  tile('FN 合计', d.total_fn === null || d.total_fn === undefined ? '—' : d.total_fn);
+
+  const kinds = document.getElementById('kinds');
+  kinds.innerHTML = '';
+  Object.entries(d.kinds || {}).forEach(([k, v]) => {
+    kinds.appendChild(AC.el('div', { class: 'tile' }, [
+      AC.el('div', { class: 'muted', text: k }),
+      AC.el('div', { class: 'mono', text: String(v) }),
+    ]));
+  });
+  if (!Object.keys(d.kinds || {}).length) {
+    kinds.innerHTML = '<span class="muted">还没有评测报告,或测试集全对。</span>';
+  }
+
+  const pairs = document.getElementById('pairs');
+  pairs.innerHTML = '';
+  if (!(d.pairs || []).length) {
+    pairs.innerHTML = '<tr><td colspan="2" class="muted">没有错位样本。</td></tr>';
+  }
+  d.pairs.forEach(p => {
+    pairs.appendChild(AC.el('tr', { class: p.count >= 2 ? 'zero' : '' }, [
+      AC.el('td', { class: 'pair', text: p.pair }),
+      AC.el('td', { class: 'mono', text: String(p.count) }),
+    ]));
+  });
+
+  const errs = document.getElementById('errs');
+  errs.innerHTML = '';
+  if (!d.errors.length) {
+    errs.innerHTML = '<p class="muted">没有错例,或还没跑评测。</p>';
+  }
+  d.errors.slice(0, 100).forEach(e => {
+    errs.appendChild(AC.el('div', { class: 'err' }, [
+      AC.el('div', { text: e.text }),
+      AC.el('div', { class: 'meta' }, [
+        AC.el('span', { text: '标准:' + (e.gold || []).join('、') + '  ' }),
+        AC.el('span', { text: '预测:' + (e.pred || []).join('、') + '  ' }),
+        AC.el('span', { text: '类型:' + (e.kind || '—') }),
+      ]),
+    ]));
+  });
+})();
+</script>
+</body>
+</html>
