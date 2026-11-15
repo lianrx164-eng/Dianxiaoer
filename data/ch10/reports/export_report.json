@@ -1,0 +1,10 @@
+{
+  "ran_at": "2026-11-15T16:18:13",
+  "checked": 149,
+  "mismatch": 0,
+  "passed": true,
+  "route": "dynamo",
+  "onnx_path": "data\\ch10\\onnx\\model.onnx",
+  "onnx_bytes": 111470,
+  "opset": 17
+}

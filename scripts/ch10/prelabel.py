@@ -7,7 +7,7 @@ from app.core.llm import structured_model
 from app.core.taxonomy import LABEL2ID, terminology_table
 
 
-class _Labeled(BaseModel):
+class Labeled(BaseModel):
     labels: list[str] = Field(description="命中的类目名数组,取术语表类目名原文")
 
 
@@ -27,11 +27,13 @@ PRELABEL_PROMPT = """你是电商客服主题标注员。对照下面这份 17 �
 
 
 async def prelabel_one(text: str) -> list[str]:
-    model = structured_model(_Labeled, temperature=0)
+    model = structured_model(Labeled, temperature=0)
     try:
-        r: _Labeled = await model.ainvoke(
+        r: Labeled | None = await model.ainvoke(
             PRELABEL_PROMPT.format(terminology=terminology_table(), text=text))
     except Exception:
+        return ["其他"]
+    if r is None:                        # 上游没吐工具调用时结构化输出为 None
         return ["其他"]
     labels = [lb for lb in r.labels if lb in LABEL2ID]
     return labels or ["其他"]
