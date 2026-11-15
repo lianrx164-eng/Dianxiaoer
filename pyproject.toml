@@ -40,6 +40,7 @@ ml = [
     "scikit-learn>=1.5",
     "onnx>=1.17",
     "onnxruntime>=1.20",
+    "onnxscript>=0.3",          # torch dynamo 版 ONNX 导出器的必需依赖
     "tokenizers>=0.20",
 ]
 
