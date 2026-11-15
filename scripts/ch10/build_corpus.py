@@ -6,6 +6,7 @@ import asyncio
 import json
 import pathlib
 import random
+import re
 
 from pydantic import BaseModel
 
@@ -51,6 +52,26 @@ SIMULATE_PROMPT = """你是电商客服语料造数员。为猫用品电商「�
 def _dump(path: pathlib.Path, samples: list[dict]) -> None:
     path.write_text("\n".join(json.dumps(s, ensure_ascii=False) for s in samples),
                     encoding="utf-8")
+
+
+# 第一轮评测暴露的字面漏标:文本里明说退/换、或有明显瑕疵描述,却没打对应标签。
+# 只补不删,规则收窄到字面依据充分的词。「换新」属保修维修,不进退换货规则。
+_RETURN_WORDS = re.compile(r"退活|想退|退货|退款|退了|退钱|换货")
+_DEFECT_WORDS = re.compile(r"坏|瑕疵|裂|漏气|发霉|长毛|次品|缩水|变形|歪|弯|掉漆|破|划痕|开胶")
+
+
+def repair_labels(samples: list[dict]) -> list[dict]:
+    """确定性补标(spec 字面铁律):退换货按退/换字面补,质量问题按瑕疵字面补。"""
+    for s in samples:
+        labels = list(s["labels"])
+        if _RETURN_WORDS.search(s["text"]) and "退换货" not in labels:
+            labels.append("退换货")
+        if _DEFECT_WORDS.search(s["text"]) and "质量问题" not in labels:
+            labels.append("质量问题")
+        if len(labels) > 1 and "其他" in labels:
+            labels = [lb for lb in labels if lb != "其他"]
+        s["labels"] = labels
+    return samples
 
 
 async def clean_texts(texts: list[str], concurrency: int = 8) -> list[str]:
@@ -128,10 +149,8 @@ async def main() -> None:
                 counts[lb] += 1
         print(f"{c.name}: 补造 {len(sims)} 条(当前 {counts[c.name]})", flush=True)
     labeled = dedupe(labeled)
-    # 标注铁律收口:「其他」是兜底类,与其他类目共存即自相矛盾 → 去掉(模拟语料的主要噪声)
-    for s in labeled:
-        if len(s["labels"]) > 1 and "其他" in s["labels"]:
-            s["labels"] = [lb for lb in s["labels"] if lb != "其他"]
+    # 标注铁律收口:「其他」不与他类共存 + 退/换、瑕疵字面漏标补齐
+    labeled = repair_labels(labeled)
     _dump(OUT / "corpus_labeled.jsonl", labeled)
     print(f"语料总量 {len(labeled)} 条;各类:{counts}")
     # 5) 抽审导出:真实池全量 + 每类模拟抽 5

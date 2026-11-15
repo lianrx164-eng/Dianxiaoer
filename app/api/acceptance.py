@@ -104,7 +104,18 @@ def _gate(key: str, no: int, title: str, page: str, job: str,
             "status": status, "headline": headline, "note": note}
 
 
-def _gates() -> list[dict]:
+async def _classified_total() -> int | None:
+    """已归类条数:读库失败(如 DB 未起)返回 None,只降级这一项。"""
+    from app.db import repository
+
+    try:
+        dist = await repository.topic_distribution()
+        return int(dist["total"])
+    except Exception:                                  # noqa: BLE001 - 单独降级
+        return None
+
+
+async def _gates() -> list[dict]:
     ds = _split_stats()
     golden = _load("golden_report.json", "ch10-golden")
     export = _load("export_report.json", "ch10-export")
@@ -227,17 +238,21 @@ def _gates() -> list[dict]:
                            f"错例 {file_lines} 条,报告记账 {len(evalr.get('errors') or [])} 条",
                            "条数须与 eval_report 一致"))
 
-    # 9 旁路批量归类
+    # 9 旁路批量归类:最近一次归类状态 + 库里实际已归类条数(读不到库只降级这一项)
+    total_classified = await _classified_total()
     if not run["present"]:
         gates.append(_gate("classify", 9, "旁路批量归类", "/acceptance", "classify-pool",
                            "missing", "还没归过类", "先跑 make classify-pool"))
     else:
         status = run.get("status")
-        ok = status in ("done", "empty")
-        head = {"done": f"归类 {run.get('written', 0)} 条",
+        ok = status in ("done", "empty") and (total_classified is None
+                                              or total_classified >= 1)
+        head = {"done": f"本次归类 {run.get('written', 0)} 条",
                 "empty": "池里没有待归类问题",
                 "below_batch": f"待归类 {run.get('pending', 0)} 条,不足一批"}.get(
             status, f"状态 {status}")
+        if total_classified is not None:
+            head += f";库里已归类 {total_classified} 条"
         gates.append(_gate("classify", 9, "旁路批量归类", "/acceptance", "classify-pool",
                            "pass" if ok else "fail", head,
                            "不足一批时用 classify-pool-force"))
@@ -245,8 +260,8 @@ def _gates() -> list[dict]:
 
 
 @router.get("/overview")
-def overview():
-    gates = _gates()
+async def overview():
+    gates = await _gates()
     passed = sum(1 for g in gates if g["status"] == "pass")
     return {"blocks": gates, "passed": passed, "total": len(gates),
             "all_pass": passed == len(gates), "classifier": _probe()}

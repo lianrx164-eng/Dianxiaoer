@@ -50,9 +50,12 @@ def main() -> None:
 
     in_use_f1 = next((s["micro_f1"] for s in scan if s["threshold"] == in_use), None)
     exact = best_t == in_use
+    # ONNX 与 torch 的分数有微小差:验证集只有百级,一条标签翻转就约 1/N 的 F1。
+    # 容差取「一条样本翻转」的量级,但仍要求当选线只差一格。
+    flip = 1.5 / max(1, len(samples))
     adjacent = (not exact and in_use_f1 is not None
                 and abs(best_t - in_use) <= 0.051
-                and abs(best_f1 - in_use_f1) <= 0.005)
+                and abs(best_f1 - in_use_f1) <= max(0.005, flip))
     report = {
         "ran_at": __import__("datetime").datetime.now().isoformat(timespec="seconds"),
         "val_size": len(samples), "scan": scan,
