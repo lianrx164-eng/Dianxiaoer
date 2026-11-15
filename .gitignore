@@ -19,3 +19,6 @@ data/ch04/rewrites.json
 data/ch09/reports/
 # ch09 Phoenix 本地 trace 库(SQLite,运行时产物)
 data/phoenix/
+# ch10 语料/模型/ONNX 产物(只留报告进 git)
+data/ch10/*
+!data/ch10/reports/

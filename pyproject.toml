@@ -32,6 +32,16 @@ dev = [
     "pytest>=9.2.0",
     "pytest-asyncio>=1.5.0",
 ]
+# ch10 训练/导出重依赖,主 dependencies 零污染:uv run --group ml ...
+ml = [
+    "torch>=2.6",
+    "transformers>=5.0",
+    "accelerate>=1.0",
+    "scikit-learn>=1.5",
+    "onnx>=1.17",
+    "onnxruntime>=1.20",
+    "tokenizers>=0.20",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -42,3 +52,12 @@ pythonpath = ["tests"]
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
+
+# ch10:Windows 上 PyPI 的 torch 是 CPU 构建;cu128 源只对 ml 组生效
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128", group = "ml" }
