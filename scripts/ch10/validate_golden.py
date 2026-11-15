@@ -6,6 +6,7 @@ import asyncio
 import json
 import pathlib
 import sys
+from datetime import datetime
 
 from scripts.ch10.prelabel import prelabel_batch
 
@@ -27,7 +28,7 @@ async def main() -> int:
             print(f"✗ {s['text']}\n    标准: {s['labels']}  预标: {pred}")
     rate = hits / len(samples)
     report = {
-        "ran_at": __import__("datetime").datetime.now().isoformat(timespec="seconds"),
+        "ran_at": datetime.now().isoformat(timespec="seconds"),
         "total": len(samples), "hits": hits, "rate": round(rate, 4),
         "pass_line": PASS_RATE, "passed": rate >= PASS_RATE, "failures": failures,
     }

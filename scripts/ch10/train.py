@@ -13,6 +13,7 @@ from transformers import (AutoModelForSequenceClassification, AutoTokenizer,
                           default_data_collator)
 
 from app.core.taxonomy import ID2LABEL, LABEL2ID, NUM_CLASSES
+from scripts.ch10.inference_lib import apply_threshold
 
 BASE = "hfl/chinese-roberta-wwm-ext"
 DATA = pathlib.Path("data/ch10/dataset")
@@ -83,7 +84,8 @@ def main() -> None:
     gold = np.array([d["labels"] for d in val_ds])
     best_t, best_f1 = 0.5, -1.0
     for t in np.arange(0.30, 0.71, 0.05):
-        f1 = f1_score(gold, (probs >= t).astype(int), average="micro", zero_division=0)
+        # 与评测/服务同一套口径:带「全不过线取最高分」兜底后再算 F1
+        f1 = f1_score(gold, apply_threshold(probs, t), average="micro", zero_division=0)
         if f1 > best_f1:
             best_t, best_f1 = round(float(t), 2), float(f1)
     OUT.mkdir(parents=True, exist_ok=True)

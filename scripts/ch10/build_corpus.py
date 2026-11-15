@@ -119,13 +119,23 @@ async def simulate(name: str, need: int) -> list[dict]:
 
 async def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
-    # 1) 捞池(标准化问法优先)
+    # 0) 预标质量闸:黄金样例没过,整批预标不放行(spec §3.3)
+    golden_path = OUT / "reports" / "golden_report.json"
+    if not golden_path.exists():
+        raise SystemExit("黄金样例闸还没跑:先 make ch10-golden")
+    golden = json.loads(golden_path.read_text(encoding="utf-8"))
+    if not golden.get("passed"):
+        raise SystemExit(
+            f"黄金样例闸未过(通过率 {golden.get('rate'):.0%}),先改预标 prompt 再跑")
+    # 1) 捞池(标准化问法优先,保留 question_id 溯源)
     pool = await repository.list_pool_texts()
-    raw = [{"text": p["text"], "labels": [], "origin": "pool"} for p in pool]
+    raw = [{"text": p["text"], "labels": [], "origin": "pool",
+            "question_id": p["question_id"]} for p in pool]
     _dump(OUT / "corpus_raw.jsonl", raw)
     print(f"捞池 {len(raw)} 条")
-    # 2) 清洗:脱敏 → 去重 → LLM 修错别字 → 再去重
-    cleaned = dedupe([{**s, "text": desensitize(s["text"])} for s in raw])
+    # 2) 清洗:脱敏 → 去重 → LLM 修错别字 → 再去重;raw_text 保留清洗前原文供复查
+    cleaned = dedupe([{**s, "raw_text": s["text"], "text": desensitize(s["text"])}
+                      for s in raw])
     fixed = await clean_texts([s["text"] for s in cleaned])
     cleaned = dedupe([{**s, "text": t} for s, t in zip(cleaned, fixed)])
     _dump(OUT / "corpus_clean.jsonl", cleaned)

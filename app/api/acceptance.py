@@ -1,35 +1,52 @@
 """ch10 验收 API:九道闸只读 data/ch10/reports 的产物,不重算任何指标。
 
-产物缺失/写坏 → present=false + 该跑哪个 make;服务不可达只降级自己那一项。
+闸的元数据(编号/标题/跳转/可重跑的作业)集中在 GATES;每道闸的判定是一个小函数,
+缺产物回 missing,坏 json 当没跑过,服务探活失败只降级自己那一项。
 """
 import json
 import pathlib
 from collections import Counter
+from collections.abc import Callable
+from dataclasses import dataclass
 
 import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.core.taxonomy import SEVERITY, TOPIC_NAMES
+from app.db import repository
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 DATA = REPO / "data" / "ch10"
 REPORTS = DATA / "reports"
 SERVICE = "http://127.0.0.1:8110"
 
+MIN_MICRO_F1 = 0.8         # 测试集总闸
+MIN_VAL_F1 = 0.8           # 训练产物闸
+
 router = APIRouter(prefix="/api/acceptance")
 
-GATES = [
-    ("data", 1, "语料与数据集", "/acceptance/data", "ch10-corpus"),
-    ("golden", 2, "黄金样例闸", "/acceptance/data", "ch10-golden"),
-    ("model", 3, "训练产物", "/acceptance/data", "ch10-train"),
-    ("onnx", 4, "ONNX 导出与服务", "/acceptance/data", "ch10-export"),
-    ("eval", 5, "测试集评测", "/acceptance/eval", "ch10-eval"),
-    ("scan", 6, "阈值扫描重演", "/acceptance/eval", "ch10-threshold-scan"),
-    ("matrix", 7, "混淆矩阵", "/acceptance/eval", "ch10-eval"),
-    ("errors", 8, "错例复核", "/acceptance/errors", "ch10-eval"),
-    ("classify", 9, "旁路批量归类", "/acceptance", "classify-pool"),
-]
+
+@dataclass(frozen=True)
+class Gate:
+    key: str
+    no: int
+    title: str
+    page: str
+    job: str
+
+
+GATES: tuple[Gate, ...] = (
+    Gate("data", 1, "语料与数据集", "/acceptance/data", "ch10-dataset"),
+    Gate("golden", 2, "黄金样例闸", "/acceptance/data", "ch10-golden"),
+    Gate("model", 3, "训练产物", "/acceptance/data", "ch10-train"),
+    Gate("onnx", 4, "ONNX 导出与服务", "/acceptance/data", "ch10-export"),
+    Gate("eval", 5, "测试集评测", "/acceptance/eval", "ch10-eval"),
+    Gate("scan", 6, "阈值扫描重演", "/acceptance/eval", "ch10-threshold-scan"),
+    Gate("matrix", 7, "混淆矩阵", "/acceptance/eval", "ch10-eval"),
+    Gate("errors", 8, "错例复核", "/acceptance/errors", "ch10-eval"),
+    Gate("classify", 9, "旁路批量归类", "/acceptance", "classify-pool"),
+)
 
 
 def _load(name: str, make: str) -> dict:
@@ -43,12 +60,22 @@ def _load(name: str, make: str) -> dict:
     return {"present": True, **body}
 
 
-def _probe() -> dict:
+async def _probe() -> dict:
     try:
-        r = httpx.get(f"{SERVICE}/healthz", timeout=1.5)
+        async with httpx.AsyncClient(timeout=1.5) as client:
+            r = await client.get(f"{SERVICE}/healthz")
         return {"ok": r.status_code == 200, "url": SERVICE}
     except Exception:                                  # noqa: BLE001 - 探活失败即不在线
         return {"ok": False, "url": SERVICE}
+
+
+async def _classified_total() -> int | None:
+    """已归类条数:读库失败(如 DB 未起)返回 None,只降级这一项。"""
+    try:
+        dist = await repository.topic_distribution()
+        return int(dist["total"])
+    except Exception:                                  # noqa: BLE001 - 单独降级
+        return None
 
 
 def _line_count(path: pathlib.Path) -> int | None:
@@ -98,181 +125,170 @@ def _threshold_in_use() -> float | None:
         return None
 
 
-def _gate(key: str, no: int, title: str, page: str, job: str,
-          status: str, headline: str, note: str = "") -> dict:
-    return {"key": key, "no": no, "title": title, "page": page, "job": job,
-            "status": status, "headline": headline, "note": note}
+# ---------- 每道闸的判定:ctx → (status, headline, note) ----------
 
-
-async def _classified_total() -> int | None:
-    """已归类条数:读库失败(如 DB 未起)返回 None,只降级这一项。"""
-    from app.db import repository
-
-    try:
-        dist = await repository.topic_distribution()
-        return int(dist["total"])
-    except Exception:                                  # noqa: BLE001 - 单独降级
-        return None
-
-
-async def _gates() -> list[dict]:
-    ds = _split_stats()
-    golden = _load("golden_report.json", "ch10-golden")
-    export = _load("export_report.json", "ch10-export")
-    evalr = _load("eval_report.json", "ch10-eval")
-    scan = _load("threshold_scan.json", "ch10-threshold-scan")
-    run = _load("classify_run.json", "classify-pool")
-    model_dir = DATA / "model"
-    service = _probe()
-    gates = []
-
-    # 1 语料与数据集
+def _gate_data(ctx: dict) -> tuple[str, str, str]:
+    ds = ctx["ds"]
     if not ds["present"]:
-        gates.append(_gate("data", 1, "语料与数据集", "/acceptance/data", "ch10-dataset",
-                           "missing", "三份考卷还没生成", "先跑 make ch10-dataset"))
-    else:
-        ok = ds["clean"] and ds["every_class_present"]
-        head = (f"训练/验证/测试 {ds['splits']['train']['size']}/"
-                f"{ds['splits']['val']['size']}/{ds['splits']['test']['size']} 条")
-        note = ("三份两两重叠 0 条" if ds["clean"]
-                else f"存在跨集重复:{ds['leaks']}")
-        if ok:
-            note += ";17 类在三份里都有样本"
-        else:
-            note += ";有类目在某份里缺席"
-        gates.append(_gate("data", 1, "语料与数据集", "/acceptance/data", "ch10-dataset",
-                           "pass" if ok else "fail", head, note))
+        return "missing", "三份考卷还没生成", "先跑 make ch10-dataset"
+    ok = ds["clean"] and ds["every_class_present"]
+    head = (f"训练/验证/测试 {ds['splits']['train']['size']}/"
+            f"{ds['splits']['val']['size']}/{ds['splits']['test']['size']} 条")
+    note = "三份两两重叠 0 条" if ds["clean"] else f"存在跨集重复:{ds['leaks']}"
+    note += ";17 类在三份里都有样本" if ds["every_class_present"] else ";有类目在某份里缺席"
+    return ("pass" if ok else "fail"), head, note
 
-    # 2 黄金样例闸
-    if not golden["present"]:
-        gates.append(_gate("golden", 2, "黄金样例闸", "/acceptance/data", "ch10-golden",
-                           "missing", "还没跑过", "先跑 make ch10-golden"))
-    else:
-        gates.append(_gate("golden", 2, "黄金样例闸", "/acceptance/data", "ch10-golden",
-                           "pass" if golden.get("passed") else "fail",
-                           f"通过率 {golden.get('rate', 0):.0%}"
-                           f"({golden.get('hits')}/{golden.get('total')})",
-                           f"闸线 {golden.get('pass_line', 0.8):.0%}"))
 
-    # 3 训练产物
-    threshold = _threshold_in_use()
-    have_model = (model_dir / "config.json").exists() and threshold is not None
-    if not have_model:
-        gates.append(_gate("model", 3, "训练产物", "/acceptance/data", "ch10-train",
-                           "missing", "还没有训练产物", "先跑 make ch10-train"))
-    else:
-        val_f1 = None
-        try:
-            val_f1 = json.loads((model_dir / "threshold.json")
-                                .read_text(encoding="utf-8")).get("val_micro_f1")
-        except (OSError, json.JSONDecodeError):
-            pass
-        ok = val_f1 is not None and val_f1 >= 0.8
-        gates.append(_gate("model", 3, "训练产物", "/acceptance/data", "ch10-train",
-                           "pass" if ok else "fail",
-                           f"阈值 {threshold},验证集 micro-F1 {val_f1:.3f}"
-                           if val_f1 is not None else f"阈值 {threshold}",
-                           "目标是验证集 ≥ 0.8"))
+def _gate_golden(ctx: dict) -> tuple[str, str, str]:
+    g = ctx["golden"]
+    if not g["present"]:
+        return "missing", "还没跑过", "先跑 make ch10-golden"
+    return ("pass" if g.get("passed") else "fail",
+            f"通过率 {g.get('rate', 0):.0%}({g.get('hits')}/{g.get('total')})",
+            f"闸线 {g.get('pass_line', 0.8):.0%}")
 
-    # 4 ONNX 导出与服务
-    if not export["present"]:
-        gates.append(_gate("onnx", 4, "ONNX 导出与服务", "/acceptance/data", "ch10-export",
-                           "missing", "还没导出", "先跑 make ch10-export"))
-    else:
-        ok = bool(export.get("passed")) and service["ok"]
-        note = "服务在线" if service["ok"] else "服务未起:make classifier-up"
-        gates.append(_gate("onnx", 4, "ONNX 导出与服务", "/acceptance/data", "ch10-export",
-                           "pass" if ok else "fail",
-                           f"一致性校验 {'通过' if export.get('passed') else '未通过'}"
-                           f"({export.get('checked', 0)} 条)", note))
 
-    # 5 测试集评测
-    if not evalr["present"]:
-        gates.append(_gate("eval", 5, "测试集评测", "/acceptance/eval", "ch10-eval",
-                           "missing", "还没评测", "先跑 make ch10-eval"))
-    else:
-        micro_f1 = (evalr.get("micro") or {}).get("f1")
-        ok = micro_f1 is not None and micro_f1 >= 0.8
-        gates.append(_gate("eval", 5, "测试集评测", "/acceptance/eval", "ch10-eval",
-                           "pass" if ok else "fail",
-                           f"micro-F1 {micro_f1:.3f}" if micro_f1 is not None else "缺 micro",
-                           "红线按类目档位逐条看"))
+def _gate_model(ctx: dict) -> tuple[str, str, str]:
+    model_dir = DATA / "model"
+    threshold = ctx["threshold"]
+    if not (model_dir / "config.json").exists() or threshold is None:
+        return "missing", "还没有训练产物", "先跑 make ch10-train"
+    val_f1 = None
+    try:
+        val_f1 = json.loads((model_dir / "threshold.json")
+                            .read_text(encoding="utf-8")).get("val_micro_f1")
+    except (OSError, json.JSONDecodeError):
+        pass
+    ok = val_f1 is not None and val_f1 >= MIN_VAL_F1
+    head = (f"阈值 {threshold},验证集 micro-F1 {val_f1:.3f}"
+            if val_f1 is not None else f"阈值 {threshold}")
+    return ("pass" if ok else "fail"), head, f"目标是验证集 ≥ {MIN_VAL_F1}"
 
-    # 6 阈值扫描
-    if not scan["present"]:
-        gates.append(_gate("scan", 6, "阈值扫描重演", "/acceptance/eval",
-                           "ch10-threshold-scan", "missing", "还没重演",
-                           "先跑 make ch10-threshold-scan"))
-    else:
-        gates.append(_gate("scan", 6, "阈值扫描重演", "/acceptance/eval",
-                           "ch10-threshold-scan",
-                           "pass" if scan.get("consistent") else "fail",
-                           f"在用阈值 {scan.get('in_use_threshold')},"
-                           f"重演当选 {scan.get('best_threshold')}",
-                           "容差口径见报告 tolerance 字段"))
 
-    # 7 混淆矩阵
-    classes = (evalr.get("classes") or []) if evalr["present"] else []
-    have_matrix = len(classes) == len(TOPIC_NAMES) and all(
+def _gate_onnx(ctx: dict) -> tuple[str, str, str]:
+    e = ctx["export"]
+    if not e["present"]:
+        return "missing", "还没导出", "先跑 make ch10-export"
+    online = ctx["service"]["ok"]
+    ok = bool(e.get("passed")) and online
+    head = (f"一致性校验 {'通过' if e.get('passed') else '未通过'}"
+            f"({e.get('checked', 0)} 条)")
+    return ("pass" if ok else "fail"), head, (
+        "服务在线" if online else "服务未起:make classifier-up")
+
+
+def _gate_eval(ctx: dict) -> tuple[str, str, str]:
+    e = ctx["eval"]
+    if not e["present"]:
+        return "missing", "还没评测", "先跑 make ch10-eval"
+    micro = (e.get("micro") or {}).get("f1")
+    ok = micro is not None and micro >= MIN_MICRO_F1
+    head = f"micro-F1 {micro:.3f}" if micro is not None else "缺 micro"
+    note = "红线按类目档位逐条看"
+    if e.get("red_line_passed") is False:
+        note += ";有类目未过自己的红线(见评测详情)"
+    return ("pass" if ok else "fail"), head, note
+
+
+def _gate_scan(ctx: dict) -> tuple[str, str, str]:
+    s = ctx["scan"]
+    if not s["present"]:
+        return "missing", "还没重演", "先跑 make ch10-threshold-scan"
+    return ("pass" if s.get("consistent") else "fail",
+            f"在用阈值 {s.get('in_use_threshold')},重演当选 {s.get('best_threshold')}",
+            f"容差口径 {s.get('tolerance')}")
+
+
+def _gate_matrix(ctx: dict) -> tuple[str, str, str]:
+    e = ctx["eval"]
+    if not e["present"]:
+        return "missing", "还没评测", "先跑 make ch10-eval"
+    classes = e.get("classes") or []
+    ok = len(classes) == len(TOPIC_NAMES) and all(
         all(k in c for k in ("tn", "fp", "fn", "tp")) for c in classes)
-    if not evalr["present"]:
-        gates.append(_gate("matrix", 7, "混淆矩阵", "/acceptance/eval", "ch10-eval",
-                           "missing", "还没评测", "先跑 make ch10-eval"))
-    else:
-        gates.append(_gate("matrix", 7, "混淆矩阵", "/acceptance/eval", "ch10-eval",
-                           "pass" if have_matrix else "fail",
-                           f"{len(classes)}/17 类宫格齐全" if have_matrix
-                           else f"只有 {len(classes)} 类带矩阵"))
+    head = (f"{len(classes)}/17 类宫格齐全" if ok else f"只有 {len(classes)} 类带矩阵")
+    return ("pass" if ok else "fail"), head, ""
 
-    # 8 错例复核
-    err_path = REPORTS / "error_samples.md"
-    if not evalr["present"] or not err_path.exists():
-        gates.append(_gate("errors", 8, "错例复核", "/acceptance/errors", "ch10-eval",
-                           "missing", "还没有错例文件", "先跑 make ch10-eval"))
-    else:
-        file_lines = sum(1 for l in err_path.read_text(encoding="utf-8").splitlines()
-                         if l.startswith("- "))
-        ok = file_lines == len(evalr.get("errors") or [])
-        gates.append(_gate("errors", 8, "错例复核", "/acceptance/errors", "ch10-eval",
-                           "pass" if ok else "fail",
-                           f"错例 {file_lines} 条,报告记账 {len(evalr.get('errors') or [])} 条",
-                           "条数须与 eval_report 一致"))
 
-    # 9 旁路批量归类:最近一次归类状态 + 库里实际已归类条数(读不到库只降级这一项)
-    total_classified = await _classified_total()
+def _gate_errors(ctx: dict) -> tuple[str, str, str]:
+    e = ctx["eval"]
+    path = REPORTS / "error_samples.md"
+    if not e["present"] or not path.exists():
+        return "missing", "还没有错例文件", "先跑 make ch10-eval"
+    file_lines = sum(1 for l in path.read_text(encoding="utf-8").splitlines()
+                     if l.startswith("- "))
+    reported = len(e.get("errors") or [])
+    return ("pass" if file_lines == reported else "fail",
+            f"错例 {file_lines} 条,报告记账 {reported} 条", "条数须与 eval_report 一致")
+
+
+def _gate_classify(ctx: dict) -> tuple[str, str, str]:
+    run = ctx["run"]
     if not run["present"]:
-        gates.append(_gate("classify", 9, "旁路批量归类", "/acceptance", "classify-pool",
-                           "missing", "还没归过类", "先跑 make classify-pool"))
+        return "missing", "还没归过类", "先跑 make classify-pool"
+    status = run.get("status")
+    total = ctx["classified"]
+    if total is None:                       # 库不可达:只能按上次运行的写入数判
+        ok = status == "done" and int(run.get("written", 0)) > 0
+        note = "库不可达,按上次运行判定"
     else:
-        status = run.get("status")
-        ok = status in ("done", "empty") and (total_classified is None
-                                              or total_classified >= 1)
-        head = {"done": f"本次归类 {run.get('written', 0)} 条",
-                "empty": "池里没有待归类问题",
-                "below_batch": f"待归类 {run.get('pending', 0)} 条,不足一批"}.get(
-            status, f"状态 {status}")
-        if total_classified is not None:
-            head += f";库里已归类 {total_classified} 条"
-        gates.append(_gate("classify", 9, "旁路批量归类", "/acceptance", "classify-pool",
-                           "pass" if ok else "fail", head,
-                           "不足一批时用 classify-pool-force"))
-    return gates
+        ok = status in ("done", "empty") and total >= 1
+        note = "不足一批时用 classify-pool-force"
+    head = {"done": f"本次归类 {run.get('written', 0)} 条",
+            "empty": "池里没有待归类问题",
+            "below_batch": f"待归类 {run.get('pending', 0)} 条,不足一批"}.get(
+        status, f"状态 {status}")
+    if total is not None:
+        head += f";库里已归类 {total} 条"
+    return ("pass" if ok else "fail"), head, note
+
+
+_RULES: dict[str, Callable[[dict], tuple[str, str, str]]] = {
+    "data": _gate_data, "golden": _gate_golden, "model": _gate_model,
+    "onnx": _gate_onnx, "eval": _gate_eval, "scan": _gate_scan,
+    "matrix": _gate_matrix, "errors": _gate_errors, "classify": _gate_classify,
+}
+
+
+async def _load_ctx() -> dict:
+    return {
+        "ds": _split_stats(),
+        "golden": _load("golden_report.json", "ch10-golden"),
+        "export": _load("export_report.json", "ch10-export"),
+        "eval": _load("eval_report.json", "ch10-eval"),
+        "scan": _load("threshold_scan.json", "ch10-threshold-scan"),
+        "run": _load("classify_run.json", "classify-pool"),
+        "threshold": _threshold_in_use(),
+        "service": await _probe(),
+        "classified": await _classified_total(),
+    }
+
+
+def _gates(ctx: dict) -> list[dict]:
+    out = []
+    for gate in GATES:
+        status, headline, note = _RULES[gate.key](ctx)
+        out.append({"key": gate.key, "no": gate.no, "title": gate.title,
+                    "page": gate.page, "job": gate.job,
+                    "status": status, "headline": headline, "note": note})
+    return out
 
 
 @router.get("/overview")
 async def overview():
-    gates = await _gates()
+    ctx = await _load_ctx()
+    gates = _gates(ctx)
     passed = sum(1 for g in gates if g["status"] == "pass")
     return {"blocks": gates, "passed": passed, "total": len(gates),
-            "all_pass": passed == len(gates), "classifier": _probe()}
+            "all_pass": passed == len(gates), "classifier": ctx["service"]}
 
 
 @router.get("/eval")
-def eval_detail():
+async def eval_detail():
     return {"eval": _load("eval_report.json", "ch10-eval"),
             "scan": _load("threshold_scan.json", "ch10-threshold-scan"),
             "threshold_in_use": _threshold_in_use(),
-            "severity": SEVERITY, "classifier": _probe()}
+            "severity": SEVERITY, "classifier": await _probe()}
 
 
 @router.get("/data")
@@ -320,8 +336,8 @@ def errors_detail():
 
 
 @router.get("/service")
-def service_detail():
-    return _probe()
+async def service_detail():
+    return await _probe()
 
 
 class ClassifyIn(BaseModel):

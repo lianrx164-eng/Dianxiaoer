@@ -32,10 +32,10 @@ def reports(tmp_path, monkeypatch):
 
 @pytest.fixture
 def service_down(monkeypatch):
-    async def boom(*a, **kw):
-        raise httpx.ConnectError("down")
+    async def probe():
+        return {"ok": False}
 
-    monkeypatch.setattr(acc, "_probe", lambda: {"ok": False})
+    monkeypatch.setattr(acc, "_probe", probe)
     return {"ok": False}
 
 
@@ -77,10 +77,7 @@ async def test_errors_missing_returns_empty(client, reports, service_down):
 
 
 async def test_service_probe_failure(client, reports, monkeypatch):
-    async def boom(*a, **kw):
-        raise httpx.ConnectError("down")
-
-    monkeypatch.setattr(acc.httpx, "get", boom)
+    monkeypatch.setattr(acc, "SERVICE", "http://127.0.0.1:9")   # 关闭的端口
     d = (await client.get("/api/acceptance/service")).json()
     assert d["ok"] is False
 
@@ -88,4 +85,5 @@ async def test_service_probe_failure(client, reports, monkeypatch):
 async def test_data_missing_dataset(client, reports, service_down):
     d = (await client.get("/api/acceptance/data")).json()
     assert d["dataset"]["present"] is False
-    assert d["leaks"] if "leaks" in d else True
+    assert d["lineage"]["raw"] is None
+    assert d["sample_review"] is False

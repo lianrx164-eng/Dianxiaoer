@@ -728,6 +728,7 @@ async def topic_questions(label: str, page: int = 1, size: int = 20) -> dict:
     items = [{
         "question_id": r.id,
         "text": r.normalized_question or r.raw_question,
+        "normalized": True,            # 方案 A:只归已归并问题,标准问法恒存在
         "raw_question": r.raw_question,
         "labels": r.labels or [],
         "source": r.source,

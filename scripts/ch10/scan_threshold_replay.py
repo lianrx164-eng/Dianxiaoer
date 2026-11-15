@@ -4,12 +4,14 @@
 """
 import json
 import pathlib
+from datetime import datetime
 
 import httpx
 import numpy as np
 from sklearn.metrics import f1_score
 
 from app.core.taxonomy import LABEL2ID, NUM_CLASSES, TOPIC_NAMES
+from scripts.ch10.inference_lib import apply_threshold
 
 SERVICE = "http://127.0.0.1:8110"
 VAL = pathlib.Path("data/ch10/dataset/val.jsonl")
@@ -35,7 +37,7 @@ def main() -> None:
     in_use = json.loads(MODEL.read_text())["threshold"]
     scan, best_t, best_f1 = [], None, -1.0
     for t in LINES:
-        preds = (probs >= t).astype(int)
+        preds = apply_threshold(probs, t)   # 与评测/服务同一套兜底口径
         f1 = float(f1_score(gold, preds, average="micro", zero_division=0))
         f1s = {n: float(f1_score(gold[:, i], preds[:, i], zero_division=0))
                for i, n in enumerate(TOPIC_NAMES)}
@@ -57,7 +59,7 @@ def main() -> None:
                 and abs(best_t - in_use) <= 0.051
                 and abs(best_f1 - in_use_f1) <= max(0.005, flip))
     report = {
-        "ran_at": __import__("datetime").datetime.now().isoformat(timespec="seconds"),
+        "ran_at": datetime.now().isoformat(timespec="seconds"),
         "val_size": len(samples), "scan": scan,
         "best_threshold": best_t, "best_micro_f1": round(best_f1, 4),
         "in_use_threshold": in_use,

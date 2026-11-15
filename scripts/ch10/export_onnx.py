@@ -6,6 +6,7 @@ torch 2.9+ 默认 dynamo=True,TorchScript 导出器(dynamo=False)已标废弃:�
 import json
 import pathlib
 import shutil
+from datetime import datetime
 
 import numpy as np
 import onnxruntime as ort
@@ -99,7 +100,7 @@ def _write_report(checked: int, mismatch: int, route: str, path: pathlib.Path) -
     reports = pathlib.Path("data/ch10/reports")
     reports.mkdir(parents=True, exist_ok=True)
     (reports / "export_report.json").write_text(json.dumps({
-        "ran_at": __import__("datetime").datetime.now().isoformat(timespec="seconds"),
+        "ran_at": datetime.now().isoformat(timespec="seconds"),
         "checked": checked, "mismatch": mismatch, "passed": mismatch == 0,
         "route": route, "onnx_path": str(path),
         "onnx_bytes": path.stat().st_size if path.exists() else None, "opset": 17,

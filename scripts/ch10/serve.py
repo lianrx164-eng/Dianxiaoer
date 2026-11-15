@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from tokenizers import Tokenizer
 
 from app.core.taxonomy import TOPIC_NAMES
+from scripts.ch10.inference_lib import apply_threshold
 
 DIR = pathlib.Path("data/ch10/onnx")
 
@@ -45,11 +46,10 @@ def classify(body: ClassifyIn):
     }
     (logits,) = _sess.run(["logits"], feed)
     probs = 1 / (1 + np.exp(-logits))
+    preds = apply_threshold(probs, _threshold)
     results = []
-    for row in probs:
-        labels = [TOPIC_NAMES[i] for i, p in enumerate(row) if p >= _threshold]
-        if not labels:                       # 全不过线取最高分兜底,不产出空标签
-            labels = [TOPIC_NAMES[int(row.argmax())]]
+    for row, hit in zip(probs, preds):
+        labels = [TOPIC_NAMES[i] for i, on in enumerate(hit) if on]
         results.append({"labels": labels,
                         "scores": {TOPIC_NAMES[i]: round(float(p), 4)
                                    for i, p in enumerate(row)}})

@@ -60,6 +60,7 @@ async def test_questions_list_by_label(client, db_session_factory, db_clean):
     assert body["label"] == "尺码" and body["total"] == 1 and body["page"] == 1
     item = body["items"][0]
     assert item["text"] == "猫窝买大了能不能退"
+    assert item["normalized"] is True
     assert item["raw_question"] == "猫窝买大了"
     assert item["labels"] == ["尺码"]
     assert item["source"] == "retrieval_low_conf"

@@ -8,6 +8,7 @@ import argparse
 import asyncio
 import json
 import pathlib
+from datetime import datetime
 
 import httpx
 
@@ -20,7 +21,7 @@ REPORTS = pathlib.Path("data/ch10/reports")
 def _write_run(status: str, pending: int, written: int, counts: dict) -> None:
     REPORTS.mkdir(parents=True, exist_ok=True)
     (REPORTS / "classify_run.json").write_text(json.dumps({
-        "ran_at": __import__("datetime").datetime.now().isoformat(timespec="seconds"),
+        "ran_at": datetime.now().isoformat(timespec="seconds"),
         "status": status, "pending": pending, "written": written, "counts": counts,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 

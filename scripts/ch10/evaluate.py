@@ -4,6 +4,7 @@
 """
 import json
 import pathlib
+from datetime import datetime
 
 import numpy as np
 import torch
@@ -11,11 +12,11 @@ from sklearn.metrics import multilabel_confusion_matrix, precision_recall_fscore
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
 from app.core.taxonomy import LABEL2ID, NUM_CLASSES, SEVERITY, TOPIC_NAMES
+from scripts.ch10.inference_lib import apply_threshold
 
 MODEL_DIR = pathlib.Path("data/ch10/model")
 TEST = pathlib.Path("data/ch10/dataset/test.jsonl")
 REPORTS = pathlib.Path("data/ch10/reports")
-RED_LINE = 0.8   # 中档及以上类目的 F1 红线
 
 
 def pick_device() -> str:
@@ -31,11 +32,7 @@ def predict(model, tokenizer, texts: list[str], threshold: float, device: str) -
                             max_length=128, return_tensors="pt").to(device)
             probs_all.append(torch.sigmoid(model(**enc).logits).cpu().numpy())
     probs = np.concatenate(probs_all)
-    preds = (probs >= threshold).astype(int)
-    for r in range(len(preds)):                    # 全不过线取最高分兜底,不产出空标签
-        if preds[r].sum() == 0:
-            preds[r][probs[r].argmax()] = 1
-    return preds
+    return apply_threshold(probs, threshold)
 
 
 def main() -> None:
@@ -107,7 +104,7 @@ def main() -> None:
     (REPORTS / "eval_report.md").write_text("\n".join(lines), encoding="utf-8")
 
     report = {
-        "ran_at": __import__("datetime").datetime.now().isoformat(timespec="seconds"),
+        "ran_at": datetime.now().isoformat(timespec="seconds"),
         "test_size": len(samples), "threshold": threshold,
         "micro": {"p": round(float(micro_p), 4), "r": round(float(micro_r), 4),
                   "f1": round(float(micro_f1), 4)},
